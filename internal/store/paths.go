@@ -10,6 +10,7 @@ func (s *Store) configPath() string { return filepath.Join(s.CodexHome, "config.
 // Files owned by codexctl.
 
 func (s *Store) currentPath() string { return filepath.Join(s.StateHome, "current") }
+func (s *Store) pendingPath() string { return filepath.Join(s.StateHome, "pending") }
 func (s *Store) lockPath() string    { return filepath.Join(s.StateHome, "lock") }
 func (s *Store) profilesDir() string { return filepath.Join(s.StateHome, "profiles") }
 

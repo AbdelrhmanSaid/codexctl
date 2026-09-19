@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"os"
 )
 
 type authInfo struct {
@@ -14,10 +13,7 @@ type authInfo struct {
 }
 
 func readAuth(path string) (authInfo, error) {
-	if err := refuseSymlink(path); err != nil {
-		return authInfo{}, err
-	}
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		return authInfo{}, err
 	}

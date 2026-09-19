@@ -51,10 +51,7 @@ func (s *Store) Login(name string, runLogin func(home string) error) (string, er
 		return "", err
 	}
 	defer release()
-	if err := s.ensureLayout(); err != nil {
-		return "", err
-	}
-	if err := s.ensureFileCredentials(); err != nil {
+	if err := s.ensureStateLayout(); err != nil {
 		return "", err
 	}
 
@@ -77,14 +74,25 @@ func (s *Store) Login(name string, runLogin func(home string) error) (string, er
 	if _, err := readAuth(loggedIn); err != nil {
 		return "", fmt.Errorf("Codex did not produce a valid file-backed login: %w", err)
 	}
-	data, err := os.ReadFile(loggedIn)
+	data, err := readFile(loggedIn)
 	if err != nil {
+		return "", err
+	}
+	// Do not touch the real Codex home until the isolated login has succeeded
+	// and produced a valid auth.json.
+	if err := s.ensureCodexLayout(); err != nil {
+		return "", err
+	}
+	if err := s.recoverPendingActivation(); err != nil {
+		return "", err
+	}
+	if err := s.ensureFileCredentials(); err != nil {
 		return "", err
 	}
 	// Save refreshes for the previously selected profile before replacing a
 	// profile with the new login. This ordering also makes re-login safe.
 	warning := s.syncCurrentProfile()
-	if err := atomicWrite(s.profilePath(name), data, 0o600); err != nil {
+	if err := writeFile(s.profilePath(name), data, 0o600); err != nil {
 		return "", fmt.Errorf("save profile: %w", err)
 	}
 	if err := s.writeActive(name, data); err != nil {
@@ -114,28 +122,41 @@ func (s *Store) Use(name string) (string, error) {
 		return "", err
 	}
 	defer release()
-	if err := s.ensureLayout(); err != nil {
+	if err := s.ensureStateLayout(); err != nil {
+		return "", err
+	}
+	// Load and validate the requested profile before changing config.toml.
+	data, err := s.loadProfile(name)
+	if err != nil {
+		return "", err
+	}
+	if err := s.ensureCodexLayout(); err != nil {
+		return "", err
+	}
+	if err := s.recoverPendingActivation(); err != nil {
 		return "", err
 	}
 	if err := s.ensureFileCredentials(); err != nil {
 		return "", err
 	}
-	return s.activateLocked(name)
+	return s.activateLocked(name, data)
 }
 
-func (s *Store) activateLocked(name string) (string, error) {
-	target := s.profilePath(name)
-	data, err := os.ReadFile(target)
+func (s *Store) loadProfile(name string) ([]byte, error) {
+	data, err := readFile(s.profilePath(name))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("profile %q does not exist; run 'codexctl login %s' first", name, name)
+			return nil, fmt.Errorf("profile %q does not exist; run 'codexctl login %s' first", name, name)
 		}
-		return "", err
+		return nil, err
 	}
 	if _, err := parseAuth(data); err != nil {
-		return "", fmt.Errorf("profile %q is invalid: %w", name, err)
+		return nil, fmt.Errorf("profile %q is invalid: %w", name, err)
 	}
+	return data, nil
+}
 
+func (s *Store) activateLocked(name string, data []byte) (string, error) {
 	warning := s.syncCurrentProfile()
 	if err := s.writeActive(name, data); err != nil {
 		return "", err
@@ -144,23 +165,65 @@ func (s *Store) activateLocked(name string) (string, error) {
 }
 
 func (s *Store) writeActive(name string, data []byte) error {
-	if err := refuseSymlink(s.authPath()); err != nil {
-		return err
+	if err := writeFile(s.pendingPath(), []byte(name+"\n"), 0o600); err != nil {
+		return fmt.Errorf("record pending activation: %w", err)
 	}
-	if err := atomicWrite(s.authPath(), data, 0o600); err != nil {
+	if err := s.finishActivation(name, data); err != nil {
+		return fmt.Errorf("activation is incomplete and will be resumed by the next login or use: %w", err)
+	}
+	return s.clearPendingActivation()
+}
+
+func (s *Store) finishActivation(name string, data []byte) error {
+	if err := writeFile(s.authPath(), data, 0o600); err != nil {
 		return fmt.Errorf("activate profile: %w", err)
 	}
-	if err := atomicWrite(s.currentPath(), []byte(name+"\n"), 0o600); err != nil {
+	if err := writeFile(s.currentPath(), []byte(name+"\n"), 0o600); err != nil {
 		return fmt.Errorf("record current profile: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) clearPendingActivation() error {
+	if err := refuseSymlink(s.pendingPath()); err != nil {
+		return err
+	}
+	if err := os.Remove(s.pendingPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("activation completed but its recovery marker could not be removed: %w", err)
+	}
+	return nil
+}
+
+// recoverPendingActivation completes a switch interrupted after its durable
+// marker was written. The caller holds the store lock, so the profile cannot
+// be changed concurrently by another codexctl process.
+func (s *Store) recoverPendingActivation() error {
+	data, err := readFile(s.pendingPath())
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read pending activation: %w", err)
+	}
+	name := strings.TrimSpace(string(data))
+	if err := validateName(name); err != nil {
+		return fmt.Errorf("pending activation marker is invalid: %w", err)
+	}
+	profile, err := s.loadProfile(name)
+	if err != nil {
+		return fmt.Errorf("recover pending activation: %w", err)
+	}
+	if err := s.finishActivation(name, profile); err != nil {
+		return fmt.Errorf("recover pending activation: %w", err)
+	}
+	return s.clearPendingActivation()
 }
 
 // syncCurrentProfile preserves refresh-token changes written by Codex while a
 // profile was active. An account ID mismatch means another tool/login changed
 // auth.json, so overwriting the saved profile would be unsafe.
 func (s *Store) syncCurrentProfile() string {
-	currentBytes, err := os.ReadFile(s.currentPath())
+	currentBytes, err := readFile(s.currentPath())
 	if err != nil {
 		return ""
 	}
@@ -168,11 +231,11 @@ func (s *Store) syncCurrentProfile() string {
 	if validateName(name) != nil {
 		return "the selected-profile marker is invalid; skipped saving active credential changes"
 	}
-	activeData, err := os.ReadFile(s.authPath())
+	activeData, err := readFile(s.authPath())
 	if err != nil {
 		return "the active auth.json could not be read; skipped saving credential changes"
 	}
-	savedData, err := os.ReadFile(s.profilePath(name))
+	savedData, err := readFile(s.profilePath(name))
 	if err != nil {
 		return "the selected profile snapshot is missing; skipped saving credential changes"
 	}
@@ -186,7 +249,7 @@ func (s *Store) syncCurrentProfile() string {
 	case accountUnverified:
 		return "could not verify the identity of the changed auth.json; skipped saving credential changes"
 	}
-	if err := atomicWrite(s.profilePath(name), activeData, 0o600); err != nil {
+	if err := writeFile(s.profilePath(name), activeData, 0o600); err != nil {
 		return "could not preserve refreshed credentials for the previous profile: " + err.Error()
 	}
 	return ""
@@ -210,7 +273,7 @@ func (s *Store) List() ([]string, string, error) {
 }
 
 func (s *Store) Current() (string, bool, error) {
-	data, err := os.ReadFile(s.currentPath())
+	data, err := readFile(s.currentPath())
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", false, nil
 	}
@@ -221,13 +284,19 @@ func (s *Store) Current() (string, bool, error) {
 	if err := validateName(name); err != nil {
 		return "", false, err
 	}
-	active, err := os.ReadFile(s.authPath())
-	if err != nil {
+	active, err := readFile(s.authPath())
+	if errors.Is(err, fs.ErrNotExist) {
 		return name, false, nil
 	}
-	saved, err := os.ReadFile(s.profilePath(name))
 	if err != nil {
+		return name, false, err
+	}
+	saved, err := readFile(s.profilePath(name))
+	if errors.Is(err, fs.ErrNotExist) {
 		return name, false, nil
+	}
+	if err != nil {
+		return name, false, err
 	}
 	match, err := compareAccounts(active, saved)
 	if err != nil {
@@ -239,7 +308,7 @@ func (s *Store) Current() (string, bool, error) {
 func (s *Store) Doctor() []Check {
 	checks := []Check{}
 	config := s.configPath()
-	data, err := os.ReadFile(config)
+	data, err := readFile(config)
 	if err != nil {
 		checks = append(checks, Check{"cannot read " + config, true})
 	} else if !rootCredentialStoreIsFile(data) {

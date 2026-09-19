@@ -4,16 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"strings"
 )
 
 func (s *Store) ensureFileCredentials() error {
 	path := s.configPath()
-	if err := refuseSymlink(path); err != nil {
-		return err
-	}
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
@@ -21,7 +17,7 @@ func (s *Store) ensureFileCredentials() error {
 		return nil
 	}
 	updated := setRootCredentialStore(data)
-	if err := atomicWrite(path, updated, 0o600); err != nil {
+	if err := writeFile(path, updated, 0o600); err != nil {
 		return fmt.Errorf("configure file-backed Codex credentials: %w", err)
 	}
 	return nil

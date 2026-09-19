@@ -18,7 +18,7 @@ the same `CODEX_HOME`.
 ## Install
 
 ```console
-go install .
+go install github.com/AbdelrhmanSaid/codexctl@latest
 ```
 
 Or build a local binary:
@@ -54,6 +54,11 @@ A cancelled or failed login leaves the active account untouched.
 `$CODEX_HOME/auth.json` (normally `~/.codex/auth.json`). Before switching away,
 it saves any token refreshes Codex wrote for the current profile. If the account
 ID unexpectedly changed, it refuses to overwrite the saved profile.
+
+A switch also records a short-lived recovery marker before updating
+`auth.json` and `current`. If the process is interrupted between those writes,
+the next successful `login` or `use` completes the interrupted switch before
+continuing.
 
 Because swapping `auth.json` only works with file-backed credentials, login and
 use ensure this root setting exists in `$CODEX_HOME/config.toml`:
@@ -102,3 +107,7 @@ OpenAI's official documentation confirms that Codex can store cached login data
 in `$CODEX_HOME/auth.json`, that CLI and IDE reuse cached login details, and that
 `cli_auth_credentials_store = "file"` selects this behavior:
 [Codex authentication](https://developers.openai.com/codex/auth).
+
+## License
+
+[MIT](LICENSE)

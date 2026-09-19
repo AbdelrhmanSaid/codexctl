@@ -9,8 +9,8 @@ import (
 	"runtime"
 )
 
-func (s *Store) ensureLayout() error {
-	for _, dir := range []string{s.CodexHome, s.StateHome, s.profilesDir()} {
+func ensureDirs(dirs ...string) error {
+	for _, dir := range dirs {
 		if err := refuseSymlink(dir); err != nil {
 			return err
 		}
@@ -22,6 +22,14 @@ func (s *Store) ensureLayout() error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) ensureStateLayout() error {
+	return ensureDirs(s.StateHome, s.profilesDir())
+}
+
+func (s *Store) ensureCodexLayout() error {
+	return ensureDirs(s.CodexHome)
 }
 
 func refuseSymlink(path string) error {
@@ -36,6 +44,22 @@ func refuseSymlink(path string) error {
 		return fmt.Errorf("refusing symlinked path %s", path)
 	}
 	return nil
+}
+
+// readFile refuses a symlink at path before reading sensitive state. Keeping
+// this check in one helper makes it harder for new call sites to bypass it.
+func readFile(path string) ([]byte, error) {
+	if err := refuseSymlink(path); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+}
+
+func writeFile(path string, data []byte, mode fs.FileMode) error {
+	if err := refuseSymlink(path); err != nil {
+		return err
+	}
+	return atomicWrite(path, data, mode)
 }
 
 func atomicWrite(path string, data []byte, mode fs.FileMode) error {

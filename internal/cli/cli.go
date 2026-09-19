@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"codexctl/internal/codex"
-	"codexctl/internal/store"
+	"github.com/AbdelrhmanSaid/codexctl/internal/codex"
+	"github.com/AbdelrhmanSaid/codexctl/internal/store"
 
 	"github.com/spf13/cobra"
 )

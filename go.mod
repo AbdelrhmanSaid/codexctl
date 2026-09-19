@@ -1,4 +1,4 @@
-module codexctl
+module github.com/AbdelrhmanSaid/codexctl
 
 go 1.24
 

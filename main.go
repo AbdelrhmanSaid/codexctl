@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"codexctl/internal/cli"
+	"github.com/AbdelrhmanSaid/codexctl/internal/cli"
 )
 
 func main() {
