@@ -1,10 +1,6 @@
 package store
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,8 +8,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 )
+
+const loginDirPrefix = ".login-"
 
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
@@ -25,12 +24,6 @@ type Store struct {
 type Check struct {
 	Message string
 	Warning bool
-}
-
-type authInfo struct {
-	Tokens struct {
-		AccountID string `json:"account_id"`
-	} `json:"tokens"`
 }
 
 func NewFromEnvironment() (*Store, error) {
@@ -65,7 +58,8 @@ func (s *Store) Login(name string, runLogin func(home string) error) (string, er
 		return "", err
 	}
 
-	tempHome, err := os.MkdirTemp(s.StateHome, ".login-")
+	s.removeAbandonedLogins()
+	tempHome, err := os.MkdirTemp(s.StateHome, loginDirPrefix+"*")
 	if err != nil {
 		return "", fmt.Errorf("create isolated login directory: %w", err)
 	}
@@ -97,6 +91,18 @@ func (s *Store) Login(name string, runLogin func(home string) error) (string, er
 		return "", err
 	}
 	return warning, nil
+}
+
+// removeAbandonedLogins deletes isolated login homes left by a login that was
+// killed before it could clean up; they may hold credentials. The caller must
+// hold the lock, which guarantees no live login still owns one.
+func (s *Store) removeAbandonedLogins() {
+	entries, _ := os.ReadDir(s.StateHome)
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), loginDirPrefix) {
+			_ = os.RemoveAll(filepath.Join(s.StateHome, entry.Name()))
+		}
+	}
 }
 
 func (s *Store) Use(name string) (string, error) {
@@ -138,13 +144,13 @@ func (s *Store) activateLocked(name string) (string, error) {
 }
 
 func (s *Store) writeActive(name string, data []byte) error {
-	if err := refuseSymlink(filepath.Join(s.CodexHome, "auth.json")); err != nil {
+	if err := refuseSymlink(s.authPath()); err != nil {
 		return err
 	}
-	if err := atomicWrite(filepath.Join(s.CodexHome, "auth.json"), data, 0o600); err != nil {
+	if err := atomicWrite(s.authPath(), data, 0o600); err != nil {
 		return fmt.Errorf("activate profile: %w", err)
 	}
-	if err := atomicWrite(filepath.Join(s.StateHome, "current"), []byte(name+"\n"), 0o600); err != nil {
+	if err := atomicWrite(s.currentPath(), []byte(name+"\n"), 0o600); err != nil {
 		return fmt.Errorf("record current profile: %w", err)
 	}
 	return nil
@@ -154,7 +160,7 @@ func (s *Store) writeActive(name string, data []byte) error {
 // profile was active. An account ID mismatch means another tool/login changed
 // auth.json, so overwriting the saved profile would be unsafe.
 func (s *Store) syncCurrentProfile() string {
-	currentBytes, err := os.ReadFile(filepath.Join(s.StateHome, "current"))
+	currentBytes, err := os.ReadFile(s.currentPath())
 	if err != nil {
 		return ""
 	}
@@ -162,7 +168,7 @@ func (s *Store) syncCurrentProfile() string {
 	if validateName(name) != nil {
 		return "the selected-profile marker is invalid; skipped saving active credential changes"
 	}
-	activeData, err := os.ReadFile(filepath.Join(s.CodexHome, "auth.json"))
+	activeData, err := os.ReadFile(s.authPath())
 	if err != nil {
 		return "the active auth.json could not be read; skipped saving credential changes"
 	}
@@ -170,15 +176,14 @@ func (s *Store) syncCurrentProfile() string {
 	if err != nil {
 		return "the selected profile snapshot is missing; skipped saving credential changes"
 	}
-	active, errA := parseAuth(activeData)
-	saved, errS := parseAuth(savedData)
-	if errA != nil || errS != nil {
+	match, err := compareAccounts(activeData, savedData)
+	if err != nil {
 		return "the active or saved credential file is invalid; skipped saving credential changes"
 	}
-	if active.Tokens.AccountID != "" && saved.Tokens.AccountID != "" && active.Tokens.AccountID != saved.Tokens.AccountID {
+	switch match {
+	case accountDifferent:
 		return "auth.json belongs to a different account than the selected profile; skipped saving credential changes"
-	}
-	if active.Tokens.AccountID == "" && saved.Tokens.AccountID == "" && hash(activeData) != hash(savedData) {
+	case accountUnverified:
 		return "could not verify the identity of the changed auth.json; skipped saving credential changes"
 	}
 	if err := atomicWrite(s.profilePath(name), activeData, 0o600); err != nil {
@@ -187,8 +192,9 @@ func (s *Store) syncCurrentProfile() string {
 	return ""
 }
 
+// List returns the saved profile names in sorted order and the selected one.
 func (s *Store) List() ([]string, string, error) {
-	entries, err := os.ReadDir(filepath.Join(s.StateHome, "profiles"))
+	entries, err := os.ReadDir(s.profilesDir())
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, "", err
 	}
@@ -198,12 +204,13 @@ func (s *Store) List() ([]string, string, error) {
 			profiles = append(profiles, strings.TrimSuffix(entry.Name(), ".json"))
 		}
 	}
+	slices.Sort(profiles)
 	current, _, _ := s.Current()
 	return profiles, current, nil
 }
 
 func (s *Store) Current() (string, bool, error) {
-	data, err := os.ReadFile(filepath.Join(s.StateHome, "current"))
+	data, err := os.ReadFile(s.currentPath())
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", false, nil
 	}
@@ -214,7 +221,7 @@ func (s *Store) Current() (string, bool, error) {
 	if err := validateName(name); err != nil {
 		return "", false, err
 	}
-	active, err := os.ReadFile(filepath.Join(s.CodexHome, "auth.json"))
+	active, err := os.ReadFile(s.authPath())
 	if err != nil {
 		return name, false, nil
 	}
@@ -222,20 +229,16 @@ func (s *Store) Current() (string, bool, error) {
 	if err != nil {
 		return name, false, nil
 	}
-	a, errA := parseAuth(active)
-	b, errB := parseAuth(saved)
-	if errA != nil || errB != nil {
+	match, err := compareAccounts(active, saved)
+	if err != nil {
 		return name, false, nil
 	}
-	if a.Tokens.AccountID != "" && b.Tokens.AccountID != "" {
-		return name, a.Tokens.AccountID == b.Tokens.AccountID, nil
-	}
-	return name, hash(active) == hash(saved), nil
+	return name, match == accountSame, nil
 }
 
 func (s *Store) Doctor() []Check {
 	checks := []Check{}
-	config := filepath.Join(s.CodexHome, "config.toml")
+	config := s.configPath()
 	data, err := os.ReadFile(config)
 	if err != nil {
 		checks = append(checks, Check{"cannot read " + config, true})
@@ -244,9 +247,9 @@ func (s *Store) Doctor() []Check {
 	} else {
 		checks = append(checks, Check{"file-backed credential storage is configured", false})
 	}
-	if err := refuseSymlink(filepath.Join(s.CodexHome, "auth.json")); err != nil {
+	if err := refuseSymlink(s.authPath()); err != nil {
 		checks = append(checks, Check{err.Error(), true})
-	} else if _, err := readAuth(filepath.Join(s.CodexHome, "auth.json")); err != nil {
+	} else if _, err := readAuth(s.authPath()); err != nil {
 		checks = append(checks, Check{"active auth.json is missing or invalid", true})
 	} else {
 		checks = append(checks, Check{"active auth.json is valid JSON and is not a symlink", false})
@@ -268,168 +271,9 @@ func (s *Store) Doctor() []Check {
 	return checks
 }
 
-func (s *Store) ensureLayout() error {
-	for _, dir := range []string{s.CodexHome, s.StateHome, filepath.Join(s.StateHome, "profiles")} {
-		if err := refuseSymlink(dir); err != nil {
-			return err
-		}
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return fmt.Errorf("create %s: %w", dir, err)
-		}
-		if runtime.GOOS != "windows" {
-			_ = os.Chmod(dir, 0o700)
-		}
-	}
-	return nil
-}
-
-func (s *Store) ensureFileCredentials() error {
-	path := filepath.Join(s.CodexHome, "config.toml")
-	if err := refuseSymlink(path); err != nil {
-		return err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	if rootCredentialStoreIsFile(data) {
-		return nil
-	}
-	updated := setRootCredentialStore(data)
-	if err := atomicWrite(path, updated, 0o600); err != nil {
-		return fmt.Errorf("configure file-backed Codex credentials: %w", err)
-	}
-	return nil
-}
-
-func rootCredentialStoreIsFile(data []byte) bool {
-	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") {
-			break
-		}
-		parts := strings.SplitN(trimmed, "=", 2)
-		if len(parts) == 2 && strings.TrimSpace(parts[0]) == "cli_auth_credentials_store" {
-			return strings.TrimSpace(parts[1]) == `"file"`
-		}
-	}
-	return false
-}
-
-func setRootCredentialStore(data []byte) []byte {
-	lines := strings.Split(string(data), "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") {
-			break
-		}
-		parts := strings.SplitN(trimmed, "=", 2)
-		if len(parts) == 2 && strings.TrimSpace(parts[0]) == "cli_auth_credentials_store" {
-			lines[i] = `cli_auth_credentials_store = "file"`
-			return []byte(strings.Join(lines, "\n"))
-		}
-	}
-	prefix := "# Managed by codexctl so named auth.json profiles are effective.\ncli_auth_credentials_store = \"file\"\n"
-	return append([]byte(prefix), data...)
-}
-
-func (s *Store) lock() (func(), error) {
-	if err := refuseSymlink(s.StateHome); err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(s.StateHome, 0o700); err != nil {
-		return nil, err
-	}
-	lock := filepath.Join(s.StateHome, "lock")
-	f, err := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			return nil, fmt.Errorf("another codexctl operation is running (remove %s only if it is stale)", lock)
-		}
-		return nil, err
-	}
-	fmt.Fprintf(f, "%d\n", os.Getpid())
-	f.Close()
-	return func() { _ = os.Remove(lock) }, nil
-}
-
-func (s *Store) profilePath(name string) string {
-	return filepath.Join(s.StateHome, "profiles", name+".json")
-}
-
 func validateName(name string) error {
 	if !profileNamePattern.MatchString(name) {
 		return errors.New("profile names must be 1-64 characters using letters, digits, '.', '_' or '-', and must start with a letter or digit")
 	}
 	return nil
-}
-
-func readAuth(path string) (authInfo, error) {
-	if err := refuseSymlink(path); err != nil {
-		return authInfo{}, err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return authInfo{}, err
-	}
-	return parseAuth(data)
-}
-
-func parseAuth(data []byte) (authInfo, error) {
-	var info authInfo
-	if len(bytes.TrimSpace(data)) == 0 || json.Unmarshal(data, &info) != nil {
-		return info, errors.New("credential file is not valid JSON")
-	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(data, &object); err != nil || object == nil {
-		return info, errors.New("credential file must be a JSON object")
-	}
-	return info, nil
-}
-
-func refuseSymlink(path string) error {
-	info, err := os.Lstat(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("refusing symlinked path %s", path)
-	}
-	return nil
-}
-
-func atomicWrite(path string, data []byte, mode fs.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	temp, err := os.CreateTemp(filepath.Dir(path), ".codexctl-")
-	if err != nil {
-		return err
-	}
-	tempName := temp.Name()
-	defer os.Remove(tempName)
-	if err := temp.Chmod(mode); err != nil && runtime.GOOS != "windows" {
-		temp.Close()
-		return err
-	}
-	if _, err := temp.Write(data); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tempName, path)
-}
-
-func hash(data []byte) string {
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
 }

@@ -4,11 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
-	"sort"
-	"strings"
 
+	"codexctl/internal/codex"
 	"codexctl/internal/store"
 
 	"github.com/spf13/cobra"
@@ -16,13 +13,35 @@ import (
 
 const version = "0.1.0"
 
+// codexCLI is the part of the Codex CLI that commands depend on.
+type codexCLI interface {
+	Login(home string, opts codex.LoginOptions, stdio codex.Stdio) error
+}
+
+// app holds what commands need from outside the process. Both are resolved
+// lazily so that help and completion never touch the environment.
+type app struct {
+	openStore func() (*store.Store, error)
+	findCodex func() (codexCLI, error)
+}
+
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	root := newRootCommand(stdin, stdout, stderr)
+	a := &app{
+		openStore: store.NewFromEnvironment,
+		findCodex: func() (codexCLI, error) {
+			c, err := codex.Find()
+			if err != nil {
+				return nil, err
+			}
+			return c, nil
+		},
+	}
+	root := a.newRootCommand(stdin, stdout, stderr)
 	root.SetArgs(args)
 	return root.Execute()
 }
 
-func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
+func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "codexctl",
 		Short:         "Manage named Codex login profiles",
@@ -35,58 +54,36 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	root.SetErr(stderr)
 	root.SetHelpCommand(&cobra.Command{Hidden: true})
 	root.AddCommand(
-		newLoginCommand(),
-		newUseCommand(),
-		newListCommand(),
-		newCurrentCommand(),
-		newDoctorCommand(),
+		a.newLoginCommand(),
+		a.newUseCommand(),
+		a.newListCommand(),
+		a.newCurrentCommand(),
+		a.newDoctorCommand(),
 		newCompletionCommand(root),
 	)
 	return root
 }
 
-func newLoginCommand() *cobra.Command {
-	var deviceAuth, apiKey, accessToken bool
+func (a *app) newLoginCommand() *cobra.Command {
+	var opts codex.LoginOptions
 	cmd := &cobra.Command{
 		Use:   "login PROFILE_NAME",
 		Short: "Log in and save a named profile",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			methods := 0
-			for _, enabled := range []bool{deviceAuth, apiKey, accessToken} {
-				if enabled {
-					methods++
-				}
-			}
-			if methods > 1 {
-				return errors.New("choose only one login method")
-			}
-
-			codex, err := exec.LookPath("codex")
-			if err != nil {
-				return errors.New("codex executable was not found in PATH")
-			}
-			loginArgs := []string{"login"}
-			if deviceAuth {
-				loginArgs = append(loginArgs, "--device-auth")
-			}
-			if apiKey {
-				loginArgs = append(loginArgs, "--with-api-key")
-			}
-			if accessToken {
-				loginArgs = append(loginArgs, "--with-access-token")
-			}
-
-			s, err := store.NewFromEnvironment()
+			// Look for codex first so a missing install fails before any
+			// state is created.
+			c, err := a.findCodex()
 			if err != nil {
 				return err
 			}
+			s, err := a.openStore()
+			if err != nil {
+				return err
+			}
+			stdio := codex.Stdio{In: cmd.InOrStdin(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}
 			warning, err := s.Login(args[0], func(home string) error {
-				child := exec.Command(codex, loginArgs...)
-				child.Env = replaceEnv(os.Environ(), "CODEX_HOME", home)
-				child.Env = replaceEnv(child.Env, "CODEX_SQLITE_HOME", home)
-				child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()
-				return child.Run()
+				return c.Login(home, opts, stdio)
 			})
 			if err != nil {
 				return err
@@ -96,19 +93,20 @@ func newLoginCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&deviceAuth, "device-auth", false, "use Codex device authentication")
-	cmd.Flags().BoolVar(&apiKey, "with-api-key", false, "read an API key from stdin")
-	cmd.Flags().BoolVar(&accessToken, "with-access-token", false, "read an access token from stdin")
+	cmd.Flags().BoolVar(&opts.DeviceAuth, "device-auth", false, "use Codex device authentication")
+	cmd.Flags().BoolVar(&opts.APIKey, "with-api-key", false, "read an API key from stdin")
+	cmd.Flags().BoolVar(&opts.AccessToken, "with-access-token", false, "read an access token from stdin")
+	cmd.MarkFlagsMutuallyExclusive("device-auth", "with-api-key", "with-access-token")
 	return cmd
 }
 
-func newUseCommand() *cobra.Command {
+func (a *app) newUseCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "use PROFILE_NAME",
 		Short: "Activate a saved profile",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := store.NewFromEnvironment()
+			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
@@ -123,14 +121,14 @@ func newUseCommand() *cobra.Command {
 	}
 }
 
-func newListCommand() *cobra.Command {
+func (a *app) newListCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List saved profiles",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, err := store.NewFromEnvironment()
+			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
@@ -138,7 +136,6 @@ func newListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sort.Strings(profiles)
 			for _, profile := range profiles {
 				marker := "  "
 				if profile == current {
@@ -151,13 +148,13 @@ func newListCommand() *cobra.Command {
 	}
 }
 
-func newCurrentCommand() *cobra.Command {
+func (a *app) newCurrentCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "current",
 		Short: "Print the selected profile",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, err := store.NewFromEnvironment()
+			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
@@ -177,13 +174,13 @@ func newCurrentCommand() *cobra.Command {
 	}
 }
 
-func newDoctorCommand() *cobra.Command {
+func (a *app) newDoctorCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Check configuration and profile state",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, err := store.NewFromEnvironment()
+			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
@@ -231,15 +228,4 @@ func printWarning(cmd *cobra.Command, warning string) {
 	if warning != "" {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
 	}
-}
-
-func replaceEnv(env []string, key, value string) []string {
-	prefix := key + "="
-	result := make([]string, 0, len(env)+1)
-	for _, item := range env {
-		if !strings.HasPrefix(item, prefix) {
-			result = append(result, item)
-		}
-	}
-	return append(result, prefix+value)
 }

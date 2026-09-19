@@ -37,10 +37,14 @@ Profiles are stored as private files:
 ```text
 ~/.codexctl/
 ├── current
+├── lock
 └── profiles/
     ├── personal.json
     └── work.json
 ```
+
+`lock` serializes codexctl operations. It is an OS-level file lock, so it is
+released automatically if codexctl crashes or is interrupted; the file itself stays in place and never needs to be removed.
 
 `codexctl login NAME` runs the official `codex login` command with an isolated
 temporary `CODEX_HOME`. A successful login is validated, saved, and activated.
