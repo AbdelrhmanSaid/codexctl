@@ -17,11 +17,35 @@ the same `CODEX_HOME`.
 
 ## Install
 
+### With Go
+
 ```console
 go install github.com/AbdelrhmanSaid/codexctl@latest
 ```
 
-Or build a local binary:
+This requires Go 1.24 or newer. Make sure Go's binary directory (usually
+`$HOME/go/bin`) is on `PATH`.
+
+### Prebuilt binaries
+
+Download the archive for your operating system and CPU from the
+[latest GitHub release](https://github.com/AbdelrhmanSaid/codexctl/releases/latest),
+extract it, and move `codexctl` (or `codexctl.exe` on Windows) to a directory on
+`PATH`. Releases are provided for macOS, Linux, Windows, and FreeBSD on x86-64
+and ARM64. SHA-256 hashes are published in `checksums.txt` with every release.
+
+Linux releases also include native packages:
+
+- Debian and Ubuntu: download the matching `.deb`, then run
+  `sudo apt install ./codexctl_*.deb`.
+- Fedora, RHEL, and related distributions: download the matching `.rpm`, then
+  run `sudo rpm -i codexctl_*.rpm`.
+- Alpine Linux: download the matching `.apk`, then run
+  `sudo apk add --allow-untrusted ./codexctl_*.apk`.
+- Arch Linux: download the matching `.pkg.tar.zst`, then run
+  `sudo pacman -U ./codexctl_*.pkg.tar.zst`.
+
+### Build locally
 
 ```console
 go build -o codexctl .
@@ -29,6 +53,24 @@ go build -o codexctl .
 
 Shell completion is available through `codexctl completion bash`, `zsh`,
 `fish`, or `powershell`.
+
+## Releasing
+
+Pushing a semantic-version tag creates a GitHub release with native archives,
+Linux packages, and checksums:
+
+```console
+git tag -a v0.1.0 -m "codexctl v0.1.0"
+git push origin v0.1.0
+```
+
+To validate the release locally without publishing it, install GoReleaser and
+run:
+
+```console
+goreleaser check
+goreleaser release --snapshot --clean
+```
 
 ## How it works
 

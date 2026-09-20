@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime/debug"
+	"strings"
 
 	"github.com/AbdelrhmanSaid/codexctl/internal/codex"
 	"github.com/AbdelrhmanSaid/codexctl/internal/store"
@@ -11,7 +13,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const version = "0.1.0"
+// version is replaced with the release tag by GoReleaser. Keep a useful
+// fallback for binaries built directly with `go build` or `go install`.
+var version = "dev"
+
+func buildVersion() string {
+	if version != "dev" {
+		return version
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return version
+	}
+	return strings.TrimPrefix(info.Main.Version, "v")
+}
 
 // codexCLI is the part of the Codex CLI that commands depend on.
 type codexCLI interface {
@@ -45,7 +60,7 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 	root := &cobra.Command{
 		Use:           "codexctl",
 		Short:         "Manage named Codex login profiles",
-		Version:       version,
+		Version:       buildVersion(),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}

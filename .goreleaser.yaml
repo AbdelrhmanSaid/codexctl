@@ -1,0 +1,74 @@
+version: 2
+
+project_name: codexctl
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: codexctl
+    main: .
+    binary: codexctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+      - freebsd
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X github.com/AbdelrhmanSaid/codexctl/internal/cli.version={{ .Version }}
+
+archives:
+  - id: archives
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+
+nfpms:
+  - id: linux-packages
+    package_name: codexctl
+    vendor: Abdelrhman Said
+    homepage: https://github.com/AbdelrhmanSaid/codexctl
+    maintainer: Abdelrhman Said
+    description: Manage named Codex login profiles.
+    license: MIT
+    formats:
+      - apk
+      - deb
+      - rpm
+      - archlinux
+    bindir: /usr/bin
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+release:
+  prerelease: auto

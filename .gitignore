@@ -1,3 +1,4 @@
 /codexctl
+/dist/
 *.test
 .DS_Store
