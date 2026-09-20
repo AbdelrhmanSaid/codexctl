@@ -86,28 +86,6 @@ state paths are refused.
 - `auth.json` contains live credentials. Do not commit, sync, or share
   `~/.codexctl`.
 
-## Prior art and design choices
-
-The implementation was informed by several open-source tools:
-
-- [codex-auth-snap](https://github.com/enerai/codex-auth-snap) emphasizes strict
-  permissions, locks, JSON validation, symlink refusal, and preserving refreshed
-  credentials before a switch.
-- [codex-auth-switch](https://github.com/kndoshn/codex-auth-switch) distinguishes
-  the tool's selected profile from the account currently observed in
-  `auth.json`, which may be changed externally.
-- [codex-account-switcher](https://github.com/Cloud370/codex-account-switcher)
-  isolates runtime homes for parallel sessions. That is useful but intentionally
-  outside this first, simple auth-switching scope.
-- [cx](https://github.com/ralphkrauss/codex-account-switcher) handles profile
-  locks and pins file-backed credential storage because OS keyrings are not
-  naturally scoped by a copied `CODEX_HOME`.
-
-OpenAI's official documentation confirms that Codex can store cached login data
-in `$CODEX_HOME/auth.json`, that CLI and IDE reuse cached login details, and that
-`cli_auth_credentials_store = "file"` selects this behavior:
-[Codex authentication](https://developers.openai.com/codex/auth).
-
 ## License
 
 [MIT](LICENSE)
