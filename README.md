@@ -5,10 +5,18 @@
 ```console
 codexctl login personal
 codexctl login work --device-auth
+codexctl import existing        # save the login Codex already has
 codexctl use personal
-codexctl list
+codexctl list -v
 codexctl current
+codexctl show work
+codexctl sync
+codexctl rename personal home
+codexctl remove work
+codexctl logout existing
 ```
+
+`list`, `current`, `show`, and `doctor` accept `--json` for scripting.
 
 It keeps Codex's normal configuration, history, sessions, skills, and plugins in
 the same `CODEX_HOME`. Only the file-backed login cache is switched. This makes
@@ -102,6 +110,30 @@ A switch also records a short-lived recovery marker before updating
 the next successful `login` or `use` completes the interrupted switch before
 continuing.
 
+`codexctl import NAME` saves the `auth.json` Codex is already using as a
+profile and selects it, for accounts that were logged in with plain
+`codex login`. It refuses an account that is already saved under another name.
+
+`codexctl sync` saves token refreshes from the active `auth.json` into the
+selected profile on demand. `login` and `use` do this automatically before
+switching away.
+
+`codexctl show NAME` and `codexctl list -v` print the account ID, email, plan,
+and last refresh time read from the saved snapshot. Tokens and API keys are
+never printed.
+
+`codexctl rename OLD NEW` renames a saved profile. If it is the selected
+profile, any token refreshes are saved first and the selection follows the new
+name. `codexctl remove NAME` deletes a saved profile. Removing the selected
+profile clears the selection but leaves `auth.json` in place, so Codex stays
+logged in until you `use` another profile.
+
+`codexctl logout NAME` ends the account's session: it runs the official
+`codex logout` in an isolated temporary `CODEX_HOME` that holds only that
+profile's credentials, then deletes the profile. If the profile was selected
+and the active `auth.json` holds the same account, that file is removed too,
+since its tokens are no longer usable.
+
 Because swapping `auth.json` only works with file-backed credentials, login and
 use ensure this root setting exists in `$CODEX_HOME/config.toml`:
 
@@ -118,7 +150,8 @@ state paths are refused.
 - Restart already-running Codex CLI, IDE, or app processes after switching;
   they may retain credentials in memory.
 - Do not use `codex logout` to switch profiles. Logout is broader than a local
-  file swap and can invalidate a session you intended to keep.
+  file swap and can invalidate a session you intended to keep. Use
+  `codexctl logout NAME` when you do want to end a specific account's session.
 - Two simultaneously running clients that use the same `CODEX_HOME` still share
   one active account. Separate `CODEX_HOME` directories are required for truly
   parallel accounts.

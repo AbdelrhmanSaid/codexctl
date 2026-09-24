@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"runtime/debug"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/AbdelrhmanSaid/codexctl/internal/codex"
 	"github.com/AbdelrhmanSaid/codexctl/internal/store"
@@ -31,10 +33,12 @@ func buildVersion() string {
 // codexCLI is the part of the Codex CLI that commands depend on.
 type codexCLI interface {
 	Login(home string, opts codex.LoginOptions, stdio codex.Stdio) error
+	Logout(home string, stdio codex.Stdio) error
 }
 
 // app holds what commands need from outside the process. Both are resolved
-// lazily so that help and completion never touch the environment.
+// lazily so that help never touches the environment; profile-name completion
+// only reads the profile list.
 type app struct {
 	openStore func() (*store.Store, error)
 	findCodex func() (codexCLI, error)
@@ -70,9 +74,15 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 	root.SetHelpCommand(&cobra.Command{Hidden: true})
 	root.AddCommand(
 		a.newLoginCommand(),
+		a.newImportCommand(),
 		a.newUseCommand(),
 		a.newListCommand(),
 		a.newCurrentCommand(),
+		a.newShowCommand(),
+		a.newSyncCommand(),
+		a.newRenameCommand(),
+		a.newRemoveCommand(),
+		a.newLogoutCommand(),
 		a.newDoctorCommand(),
 		newCompletionCommand(root),
 	)
@@ -82,9 +92,10 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 func (a *app) newLoginCommand() *cobra.Command {
 	var opts codex.LoginOptions
 	cmd := &cobra.Command{
-		Use:   "login PROFILE_NAME",
-		Short: "Log in and save a named profile",
-		Args:  cobra.ExactArgs(1),
+		Use:               "login PROFILE_NAME",
+		Short:             "Log in and save a named profile",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Look for codex first so a missing install fails before any
 			// state is created.
@@ -115,11 +126,33 @@ func (a *app) newLoginCommand() *cobra.Command {
 	return cmd
 }
 
+func (a *app) newImportCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:               "import PROFILE_NAME",
+		Short:             "Save the active auth.json as a profile",
+		Long:              "Save the credentials Codex is currently using as a named profile and select it.\nUse this for an account that was logged in with plain 'codex login'.",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: cobra.NoFileCompletions,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := a.openStore()
+			if err != nil {
+				return err
+			}
+			if err := s.Import(args[0]); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Imported the active login as profile %q.\n", args[0])
+			return nil
+		},
+	}
+}
+
 func (a *app) newUseCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "use PROFILE_NAME",
-		Short: "Activate a saved profile",
-		Args:  cobra.ExactArgs(1),
+		Use:               "use PROFILE_NAME",
+		Short:             "Activate a saved profile",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.completeProfiles,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.openStore()
 			if err != nil {
@@ -137,7 +170,8 @@ func (a *app) newUseCommand() *cobra.Command {
 }
 
 func (a *app) newListCommand() *cobra.Command {
-	return &cobra.Command{
+	var verbose, asJSON bool
+	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List saved profiles",
@@ -147,24 +181,40 @@ func (a *app) newListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			profiles, current, err := s.List()
+			profiles, err := s.Profiles()
 			if err != nil {
 				return err
 			}
-			for _, profile := range profiles {
-				marker := "  "
-				if profile == current {
-					marker = "* "
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), marker+profile)
+			out := cmd.OutOrStdout()
+			if asJSON {
+				return writeJSON(out, profiles)
 			}
-			return nil
+			if !verbose {
+				for _, p := range profiles {
+					fmt.Fprintln(out, marker(p.Selected)+p.Name)
+				}
+				return nil
+			}
+			w := tabwriter.NewWriter(out, 2, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  NAME\tAUTH\tEMAIL\tPLAN\tLAST REFRESH")
+			for _, p := range profiles {
+				auth := p.AuthMode
+				if !p.Valid {
+					auth = "invalid"
+				}
+				fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%s\n", marker(p.Selected), p.Name, auth, p.Email, p.Plan, p.LastRefresh)
+			}
+			return w.Flush()
 		},
 	}
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show account details")
+	addJSONFlag(cmd, &asJSON)
+	return cmd
 }
 
 func (a *app) newCurrentCommand() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "current",
 		Short: "Print the selected profile",
 		Args:  cobra.NoArgs,
@@ -180,6 +230,12 @@ func (a *app) newCurrentCommand() *cobra.Command {
 			if current == "" {
 				return errors.New("no profile has been selected")
 			}
+			if asJSON {
+				return writeJSON(cmd.OutOrStdout(), struct {
+					Name    string `json:"name"`
+					Matches bool   `json:"matches"`
+				}{current, matches})
+			}
 			fmt.Fprintln(cmd.OutOrStdout(), current)
 			if !matches {
 				printWarning(cmd, "the active auth.json no longer matches the selected profile")
@@ -187,10 +243,143 @@ func (a *app) newCurrentCommand() *cobra.Command {
 			return nil
 		},
 	}
+	addJSONFlag(cmd, &asJSON)
+	return cmd
+}
+
+func (a *app) newShowCommand() *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:               "show PROFILE_NAME",
+		Short:             "Show a profile's account details",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.completeProfiles,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := a.openStore()
+			if err != nil {
+				return err
+			}
+			p, err := s.Show(args[0])
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if asJSON {
+				return writeJSON(out, p)
+			}
+			w := tabwriter.NewWriter(out, 0, 0, 1, ' ', 0)
+			fmt.Fprintf(w, "Name:\t%s\n", p.Name)
+			fmt.Fprintf(w, "Selected:\t%s\n", yesNo(p.Selected))
+			fmt.Fprintf(w, "Auth mode:\t%s\n", orDash(p.AuthMode))
+			fmt.Fprintf(w, "Account ID:\t%s\n", orDash(p.AccountID))
+			fmt.Fprintf(w, "Email:\t%s\n", orDash(p.Email))
+			fmt.Fprintf(w, "Plan:\t%s\n", orDash(p.Plan))
+			fmt.Fprintf(w, "Last refresh:\t%s\n", orDash(p.LastRefresh))
+			return w.Flush()
+		},
+	}
+	addJSONFlag(cmd, &asJSON)
+	return cmd
+}
+
+func (a *app) newSyncCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "sync",
+		Short: "Save refreshed credentials into the selected profile",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := a.openStore()
+			if err != nil {
+				return err
+			}
+			name, err := s.Sync()
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Saved the active credentials into profile %q.\n", name)
+			return nil
+		},
+	}
+}
+
+func (a *app) newRenameCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:               "rename OLD_NAME NEW_NAME",
+		Short:             "Rename a saved profile",
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: a.completeProfiles,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := a.openStore()
+			if err != nil {
+				return err
+			}
+			warning, err := s.Rename(args[0], args[1])
+			if err != nil {
+				return err
+			}
+			printWarning(cmd, warning)
+			fmt.Fprintf(cmd.OutOrStdout(), "Renamed profile %q to %q.\n", args[0], args[1])
+			return nil
+		},
+	}
+}
+
+func (a *app) newRemoveCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:               "remove PROFILE_NAME",
+		Aliases:           []string{"rm"},
+		Short:             "Delete a saved profile",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.completeProfiles,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := a.openStore()
+			if err != nil {
+				return err
+			}
+			warning, err := s.Remove(args[0])
+			if err != nil {
+				return err
+			}
+			printWarning(cmd, warning)
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed profile %q.\n", args[0])
+			return nil
+		},
+	}
+}
+
+func (a *app) newLogoutCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:               "logout PROFILE_NAME",
+		Short:             "Log out of a profile's account and delete the profile",
+		Long:              "Run 'codex logout' for the profile's account in an isolated directory, then delete the profile.\nUnlike 'remove', this ends the session itself.",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: a.completeProfiles,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.findCodex()
+			if err != nil {
+				return err
+			}
+			s, err := a.openStore()
+			if err != nil {
+				return err
+			}
+			stdio := codex.Stdio{In: cmd.InOrStdin(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}
+			warning, err := s.Logout(args[0], func(home string) error {
+				return c.Logout(home, stdio)
+			})
+			if err != nil {
+				return err
+			}
+			printWarning(cmd, warning)
+			fmt.Fprintf(cmd.OutOrStdout(), "Logged out and removed profile %q.\n", args[0])
+			return nil
+		},
+	}
 }
 
 func (a *app) newDoctorCommand() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check configuration and profile state",
 		Args:  cobra.NoArgs,
@@ -199,14 +388,30 @@ func (a *app) newDoctorCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			type result struct {
+				Message string `json:"message"`
+				OK      bool   `json:"ok"`
+			}
 			failed := false
+			results := []result{}
 			for _, check := range s.Doctor() {
-				status := "ok"
 				if check.Warning {
-					status = "warn"
 					failed = true
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%-4s %s\n", status, check.Message)
+				results = append(results, result{check.Message, !check.Warning})
+			}
+			if asJSON {
+				if err := writeJSON(cmd.OutOrStdout(), results); err != nil {
+					return err
+				}
+			} else {
+				for _, r := range results {
+					status := "ok"
+					if !r.OK {
+						status = "warn"
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "%-4s %s\n", status, r.Message)
+				}
 			}
 			if failed {
 				return errors.New("doctor found one or more problems")
@@ -214,6 +419,8 @@ func (a *app) newDoctorCommand() *cobra.Command {
 			return nil
 		},
 	}
+	addJSONFlag(cmd, &asJSON)
+	return cmd
 }
 
 func newCompletionCommand(root *cobra.Command) *cobra.Command {
@@ -237,6 +444,53 @@ func newCompletionCommand(root *cobra.Command) *cobra.Command {
 			}
 		},
 	}
+}
+
+// completeProfiles offers saved profile names for a command's first argument.
+func (a *app) completeProfiles(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+	if len(args) != 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	s, err := a.openStore()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	names, _, err := s.List()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
+
+func addJSONFlag(cmd *cobra.Command, v *bool) {
+	cmd.Flags().BoolVar(v, "json", false, "print machine-readable JSON")
+}
+
+func writeJSON(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
+}
+
+func marker(selected bool) string {
+	if selected {
+		return "* "
+	}
+	return "  "
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
+}
+
+func orDash(v string) string {
+	if v == "" {
+		return "-"
+	}
+	return v
 }
 
 func printWarning(cmd *cobra.Command, warning string) {
