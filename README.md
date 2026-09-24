@@ -25,6 +25,42 @@ the same `CODEX_HOME`.
 
 ## Install
 
+### Install script
+
+On Linux, macOS, FreeBSD, and WSL:
+
+```console
+curl -fsSL https://raw.githubusercontent.com/AbdelrhmanSaid/codexctl/master/install.sh | sh
+```
+
+On Windows, from PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/AbdelrhmanSaid/codexctl/master/install.ps1 | iex
+```
+
+Both scripts download the release archive for your platform, check its
+SHA-256 against the release's `checksums.txt`, and install the `codexctl`
+executable. `install.sh` also verifies the Ed25519 signature on
+`checksums.txt` when the local `openssl` supports it. On Unix systems the
+executable goes to `/usr/local/bin` when that is writable, otherwise to
+`~/.local/bin`. On Windows it goes to `%LOCALAPPDATA%\Programs\codexctl`,
+which is added to your user `PATH`.
+
+Options pick a release or an install directory:
+
+```console
+curl -fsSL https://raw.githubusercontent.com/AbdelrhmanSaid/codexctl/master/install.sh | sh -s -- --version 0.2.0 --dir ~/bin
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/AbdelrhmanSaid/codexctl/master/install.ps1))) -Version 0.2.0 -InstallDir C:\Tools\codexctl
+```
+
+The same settings can be given as the `CODEXCTL_VERSION` and
+`CODEXCTL_INSTALL_DIR` environment variables. Run the script with `--help`
+(or read the header of `install.ps1`) for the full list.
+
 ### With Go
 
 ```console
