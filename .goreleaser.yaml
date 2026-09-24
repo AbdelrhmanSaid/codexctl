@@ -58,6 +58,16 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+# checksums.txt is signed with the project's Ed25519 key so `codexctl update`
+# can verify a release before installing it. The private key is the
+# CODEXCTL_SIGNING_KEY secret; the public key is embedded in internal/update.
+signs:
+  - id: checksums
+    artifacts: checksum
+    cmd: go
+    args: ["run", "./tools/sign", "sign", "-out", "${signature}", "${artifact}"]
+    signature: "${artifact}.sig"
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 

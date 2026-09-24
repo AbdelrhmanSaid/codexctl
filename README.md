@@ -62,6 +62,25 @@ go build -o codexctl .
 Shell completion is available through `codexctl completion bash`, `zsh`,
 `fish`, or `powershell`.
 
+### Updating
+
+```console
+codexctl update --check   # report whether a newer release exists
+codexctl update           # download, verify, and replace this executable
+codexctl update --to 0.2.0
+```
+
+`update` downloads the release archive for the current platform from GitHub,
+checks its SHA-256 against the release's `checksums.txt`, and verifies the
+Ed25519 signature on that file with a public key built into the binary. A
+release that fails either check is never installed. The new executable is
+written next to the old one and renamed over it; on Windows the old file is
+moved aside as `codexctl.exe.old` and cleaned up by the next update.
+
+Binaries installed with a Linux package or `go install` are told to update the
+same way they were installed. `--force` overrides that, and is also required to
+downgrade with `--to`. `update` never contacts the network unless you run it.
+
 ## Releasing
 
 Pushing a semantic-version tag creates a GitHub release with native archives,
@@ -72,13 +91,29 @@ git tag -a v0.1.0 -m "codexctl v0.1.0"
 git push origin v0.1.0
 ```
 
+Releases are signed so that `codexctl update` can verify them. The Ed25519
+private key lives in the `CODEXCTL_SIGNING_KEY` repository secret and the
+matching public key is embedded in `internal/update/sign.go`. To create a key:
+
+```console
+go run ./tools/sign keygen -out signing.key
+gh secret set CODEXCTL_SIGNING_KEY < signing.key
+```
+
+Then paste the printed public key into `internal/update/sign.go`. Binaries
+only trust the key they were built with, so rotate a key by publishing one
+release, signed with the old key, that embeds the new one.
+
 To validate the release locally without publishing it, install GoReleaser and
 run:
 
 ```console
 goreleaser check
-goreleaser release --snapshot --clean
+CODEXCTL_SIGNING_KEY=$(cat signing.key) goreleaser release --snapshot --clean
+go run ./tools/sign verify dist/checksums.txt
 ```
+
+Snapshot builds in CI skip signing.
 
 ## How it works
 
