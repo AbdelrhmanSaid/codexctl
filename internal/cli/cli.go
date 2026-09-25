@@ -463,7 +463,7 @@ func newUpdateCommand() *cobra.Command {
 			if check {
 				switch {
 				case current == "dev":
-					fmt.Fprintf(out, "codexctl %s is the latest release; this is a development build.\n", release.Version)
+					fmt.Fprintf(out, "The latest release is codexctl %s. This is a development build, so it cannot be compared.\n", release.Version)
 				case cmp > 0:
 					fmt.Fprintf(out, "codexctl %s is available (installed %s). Run 'codexctl update' to install it.\n", release.Version, current)
 				case cmp < 0:
@@ -486,9 +486,12 @@ func newUpdateCommand() *cobra.Command {
 					fmt.Fprintf(out, "codexctl %s is already installed.\n", current)
 					return nil
 				}
-				if cmp < 0 && target == "" {
-					fmt.Fprintf(out, "codexctl %s is installed and is newer than release %s. Pass --to %s --force to downgrade.\n", current, release.Version, release.Version)
-					return nil
+				if cmp < 0 {
+					if target == "" {
+						fmt.Fprintf(out, "codexctl %s is installed and is newer than release %s. Pass --to %s --force to downgrade.\n", current, release.Version, release.Version)
+						return nil
+					}
+					return fmt.Errorf("codexctl %s is newer than %s; pass --force to downgrade", current, release.Version)
 				}
 			}
 			archive, err := client.Download(ctx, release)

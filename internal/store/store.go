@@ -55,18 +55,11 @@ func (s *Store) Login(name string, runLogin func(home string) error) (string, er
 		return "", err
 	}
 
-	s.removeAbandonedLogins()
-	tempHome, err := os.MkdirTemp(s.StateHome, loginDirPrefix+"*")
+	tempHome, err := s.isolatedHome()
 	if err != nil {
-		return "", fmt.Errorf("create isolated login directory: %w", err)
-	}
-	defer os.RemoveAll(tempHome)
-	if err := os.Chmod(tempHome, 0o700); err != nil && runtime.GOOS != "windows" {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(tempHome, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
-		return "", fmt.Errorf("write isolated login config: %w", err)
-	}
+	defer os.RemoveAll(tempHome)
 	if err := runLogin(tempHome); err != nil {
 		return "", fmt.Errorf("codex login failed: %w", err)
 	}
@@ -99,6 +92,27 @@ func (s *Store) Login(name string, runLogin func(home string) error) (string, er
 		return "", err
 	}
 	return warning, nil
+}
+
+// isolatedHome creates a private temporary CODEX_HOME configured for
+// file-backed credentials, in which codex login or logout can run without
+// touching the real Codex home. The caller must hold the lock and remove the
+// directory when done.
+func (s *Store) isolatedHome() (string, error) {
+	s.removeAbandonedLogins()
+	home, err := os.MkdirTemp(s.StateHome, loginDirPrefix+"*")
+	if err != nil {
+		return "", fmt.Errorf("create isolated Codex home: %w", err)
+	}
+	if err := os.Chmod(home, 0o700); err != nil && runtime.GOOS != "windows" {
+		os.RemoveAll(home)
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
+		os.RemoveAll(home)
+		return "", fmt.Errorf("write isolated Codex config: %w", err)
+	}
+	return home, nil
 }
 
 // removeAbandonedLogins deletes isolated login homes left by a login that was

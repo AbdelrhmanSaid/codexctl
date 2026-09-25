@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -186,18 +185,11 @@ func (s *Store) Logout(name string, runLogout func(home string) error) (string, 
 		}
 	}
 
-	s.removeAbandonedLogins()
-	tempHome, err := os.MkdirTemp(s.StateHome, loginDirPrefix+"*")
+	tempHome, err := s.isolatedHome()
 	if err != nil {
-		return "", fmt.Errorf("create isolated logout directory: %w", err)
-	}
-	defer os.RemoveAll(tempHome)
-	if err := os.Chmod(tempHome, 0o700); err != nil && runtime.GOOS != "windows" {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(tempHome, "config.toml"), []byte("cli_auth_credentials_store = \"file\"\n"), 0o600); err != nil {
-		return "", fmt.Errorf("write isolated logout config: %w", err)
-	}
+	defer os.RemoveAll(tempHome)
 	if err := os.WriteFile(filepath.Join(tempHome, "auth.json"), data, 0o600); err != nil {
 		return "", fmt.Errorf("write isolated logout credentials: %w", err)
 	}
