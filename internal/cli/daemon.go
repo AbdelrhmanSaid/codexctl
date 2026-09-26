@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -77,9 +78,9 @@ func (a *app) restartDaemon(cmd *cobra.Command, s *store.Store) error {
 	if err != nil {
 		return fmt.Errorf("cannot restart the daemon: %w", err)
 	}
-	// Codex prints the restart result as JSON; keep it off stdout so the
-	// command's own output stays scriptable.
-	stdio := codex.Stdio{Out: cmd.ErrOrStderr(), Err: cmd.ErrOrStderr()}
+	// Codex prints a JSON restart result on stdout. The command reports
+	// success itself; keep Codex's stderr for failure diagnostics.
+	stdio := codex.Stdio{Out: io.Discard, Err: cmd.ErrOrStderr()}
 	if err := c.RestartDaemon(s.CodexHome, stdio); err != nil {
 		return fmt.Errorf("restarting the Codex app-server daemon failed; check whether it is still running with 'codexctl doctor': %w", err)
 	}

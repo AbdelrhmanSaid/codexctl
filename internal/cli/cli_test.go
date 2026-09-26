@@ -137,6 +137,9 @@ func TestUseRestartsDaemonWhenConfirmed(t *testing.T) {
 		assertContains(t, stderr, "Restart it now? [y/N]")
 		assertContains(t, stdout, `Now using profile "a"`)
 		assertContains(t, stdout, "Restarted the Codex app-server daemon")
+		if strings.Contains(stdout+stderr, `"status":"restarted"`) {
+			t.Fatalf("restart JSON leaked into output:\nstdout: %s\nstderr: %s", stdout, stderr)
+		}
 	}
 }
 
@@ -290,6 +293,9 @@ func TestRestartDaemonCommand(t *testing.T) {
 	assertContains(t, stderr, "pid 42")
 	assertContains(t, stderr, "interrupts active Codex sessions")
 	assertContains(t, stdout, "Restarted the Codex app-server daemon")
+	if strings.Contains(stdout+stderr, `"status":"restarted"`) {
+		t.Fatalf("restart JSON leaked into output:\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
 }
 
 func TestRestartDaemonRefusesWithoutRunningDaemon(t *testing.T) {
