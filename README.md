@@ -14,6 +14,7 @@ codexctl sync
 codexctl rename personal home
 codexctl remove work
 codexctl logout existing
+codexctl restart-daemon         # make a running Codex daemon reload the switch
 ```
 
 `list`, `current`, `show`, and `doctor` accept `--json` for scripting.
@@ -50,11 +51,11 @@ which is added to your user `PATH`.
 Options pick a release or an install directory:
 
 ```console
-curl -fsSL https://raw.githubusercontent.com/AbdelrhmanSaid/codexctl/master/install.sh | sh -s -- --version 0.2.0 --dir ~/bin
+curl -fsSL https://raw.githubusercontent.com/AbdelrhmanSaid/codexctl/master/install.sh | sh -s -- --version 0.2.1 --dir ~/bin
 ```
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/AbdelrhmanSaid/codexctl/master/install.ps1))) -Version 0.2.0 -InstallDir C:\Tools\codexctl
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/AbdelrhmanSaid/codexctl/master/install.ps1))) -Version 0.2.1 -InstallDir C:\Tools\codexctl
 ```
 
 The same settings can be given as the `CODEXCTL_VERSION` and
@@ -103,7 +104,7 @@ Shell completion is available through `codexctl completion bash`, `zsh`,
 ```console
 codexctl update --check   # report whether a newer release exists
 codexctl update           # download, verify, and replace this executable
-codexctl update --to 0.2.0
+codexctl update --to 0.2.1
 ```
 
 `update` downloads the release archive for the current platform from GitHub,
@@ -123,8 +124,8 @@ Pushing a semantic-version tag creates a GitHub release with native archives,
 Linux packages, and checksums:
 
 ```console
-git tag -a v0.1.0 -m "codexctl v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.1 -m "codexctl v0.2.1"
+git push origin v0.2.1
 ```
 
 Releases are signed so that `codexctl update` can verify them. The Ed25519
@@ -159,6 +160,7 @@ Profiles are stored as private files:
 ~/.codexctl/
 ├── current
 ├── lock
+├── switched
 └── profiles/
     ├── personal.json
     └── work.json
@@ -216,10 +218,71 @@ Profile directories use mode `0700` and credential/state files use `0600` on
 POSIX systems. Credential contents are never printed. Symlinked credential and
 state paths are refused.
 
+## The Codex app-server daemon
+
+Codex v0.157.0 and later runs a shared app-server daemon in the background
+and connects the CLI, IDE extensions, and the desktop app to it. The daemon
+reads `auth.json` once, when it starts, and keeps those credentials in memory.
+It does not watch the file, and its protocol has no request that reloads it,
+so after `codexctl use` a running daemon keeps using the previous account
+until it is restarted. Plain `codex login` has the same gap.
+
+codexctl handles this as follows:
+
+- After every command that changes `auth.json` (`login`, `use`, `logout` of
+  the selected profile, or any command that finishes an interrupted switch),
+  codexctl checks whether a daemon is running for the same `CODEX_HOME`. If
+  one is, it says so and, when run from a terminal, asks whether to restart
+  it now. The default answer is no. In scripts and pipes it never asks and
+  never restarts; it prints a reminder instead.
+- `codexctl restart-daemon` restarts the daemon on demand. It runs
+  `codex app-server daemon restart` with the same `CODEX_HOME`.
+- A restart interrupts every Codex session that runs on the daemon. Codex
+  tries to resume interrupted threads after a restart, but a turn that was in
+  progress may be lost, so let running work finish first.
+- codexctl never restarts a daemon silently and never starts one. Since
+  `codex app-server daemon restart` would start a daemon when none is
+  running, codexctl restarts only when the daemon's pid file names a live
+  process *and* its control socket accepts a connection. If those disagree,
+  it reports why and does nothing.
+
+### Detecting and resolving a mismatch
+
+`codexctl current` and `codexctl doctor` warn when the running daemon started
+before codexctl last changed `auth.json`:
+
+```console
+$ codexctl doctor
+ok   file-backed credential storage is configured
+ok   active auth.json is valid JSON and is not a symlink
+ok   2 saved profile(s)
+ok   active auth.json matches profile work
+warn Codex app-server daemon (pid 12345) started before codexctl switched to profile "work" and still uses the previous credentials; run 'codexctl restart-daemon' to reload it (this interrupts active Codex sessions)
+```
+
+`codexctl current --json` reports the same condition as `"daemon_stale": true`.
+
+The check compares the daemon's start time with the time recorded in
+`~/.codexctl/switched`, which codexctl writes whenever it changes
+`auth.json`. That file holds the `CODEX_HOME`, the profile name, and a
+timestamp, never credentials. The daemon's start time is read from its pid
+file on macOS and taken from that file's modification time elsewhere.
+codexctl does not ask the daemon which account it holds: that would need a
+WebSocket client for the app-server protocol, and the daemon's account query
+contacts the network.
+
+To resolve a mismatch, run `codexctl restart-daemon` once no Codex session is
+doing work you would miss. Until then the daemon keeps using the previous
+account, and if it refreshes that account's tokens it writes them to
+`auth.json` over the newly selected profile. codexctl's account-ID check
+refuses to save such a file into the selected profile, so saved profiles stay
+intact, and running `codexctl use NAME` again restores the right credentials.
+
 ## Important behavior
 
 - Restart already-running Codex CLI, IDE, or app processes after switching;
-  they may retain credentials in memory.
+  they may retain credentials in memory. The shared app-server daemon always
+  does; see above.
 - Do not use `codex logout` to switch profiles. Logout is broader than a local
   file swap and can invalidate a session you intended to keep. Use
   `codexctl logout NAME` when you do want to end a specific account's session.

@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+
+	"github.com/AbdelrhmanSaid/codexctl/internal/daemon"
 )
 
 const loginDirPrefix = ".login-"
@@ -19,6 +21,11 @@ var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 type Store struct {
 	CodexHome string
 	StateHome string
+	// DetectDaemon inspects the app-server daemon of a Codex home. Nil means
+	// daemon.Detect; tests substitute a fake.
+	DetectDaemon func(codexHome string) daemon.Status
+
+	authChanged bool
 }
 
 type Check struct {
@@ -192,6 +199,7 @@ func (s *Store) finishActivation(name string, data []byte) error {
 	if err := writeFile(s.authPath(), data, 0o600); err != nil {
 		return fmt.Errorf("activate profile: %w", err)
 	}
+	s.recordSwitch(name)
 	if err := writeFile(s.currentPath(), []byte(name+"\n"), 0o600); err != nil {
 		return fmt.Errorf("record current profile: %w", err)
 	}
@@ -351,6 +359,7 @@ func (s *Store) Doctor() []Check {
 	} else {
 		checks = append(checks, Check{"active auth.json matches profile " + current, false})
 	}
+	checks = append(checks, s.daemonCheck())
 	return checks
 }
 

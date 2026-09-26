@@ -59,6 +59,17 @@ func (c *CLI) Logout(home string, stdio Stdio) error {
 	return child.Run()
 }
 
+// RestartDaemon runs `codex app-server daemon restart` for the daemon of the
+// Codex home at home, which is the only supported way to make it reload
+// auth.json. It interrupts every session running on the daemon. Codex starts
+// a daemon if none is running, so the caller must first check that one is.
+func (c *CLI) RestartDaemon(home string, stdio Stdio) error {
+	child := exec.Command(c.Path, "app-server", "daemon", "restart")
+	child.Env = setEnv(os.Environ(), "CODEX_HOME", home)
+	child.Stdin, child.Stdout, child.Stderr = stdio.In, stdio.Out, stdio.Err
+	return child.Run()
+}
+
 func (o LoginOptions) args() []string {
 	args := []string{"login"}
 	if o.DeviceAuth {

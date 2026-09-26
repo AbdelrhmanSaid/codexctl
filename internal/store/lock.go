@@ -41,7 +41,7 @@ func (s *Store) lock() (func(), error) {
 // recordHolder notes the current process in a lock file it has just locked.
 func recordHolder(f *os.File) {
 	if f.Truncate(0) == nil {
-		_, _ = f.WriteAt([]byte(fmt.Sprintf("%d\n", os.Getpid())), 0)
+		_, _ = f.WriteAt(fmt.Appendf(nil, "%d\n", os.Getpid()), 0)
 	}
 }
 

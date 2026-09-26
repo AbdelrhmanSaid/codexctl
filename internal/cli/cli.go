@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"runtime/debug"
 	"strings"
 	"text/tabwriter"
@@ -35,14 +36,18 @@ func buildVersion() string {
 type codexCLI interface {
 	Login(home string, opts codex.LoginOptions, stdio codex.Stdio) error
 	Logout(home string, stdio codex.Stdio) error
+	RestartDaemon(home string, stdio codex.Stdio) error
 }
 
-// app holds what commands need from outside the process. Both are resolved
-// lazily so that help never touches the environment; profile-name completion
-// only reads the profile list.
+// app holds what commands need from outside the process. The dependencies
+// are resolved lazily so that help never touches the environment;
+// profile-name completion only reads the profile list.
 type app struct {
 	openStore func() (*store.Store, error)
 	findCodex func() (codexCLI, error)
+	// interactive is whether stdin is a terminal, so commands may ask
+	// before restarting the daemon.
+	interactive bool
 }
 
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -55,6 +60,9 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 			}
 			return c, nil
 		},
+	}
+	if f, ok := stdin.(*os.File); ok {
+		a.interactive = isTerminal(f)
 	}
 	root := a.newRootCommand(stdin, stdout, stderr)
 	root.SetArgs(args)
@@ -85,6 +93,7 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 		a.newRemoveCommand(),
 		a.newLogoutCommand(),
 		a.newDoctorCommand(),
+		a.newRestartDaemonCommand(),
 		newUpdateCommand(),
 		newCompletionCommand(root),
 	)
@@ -118,6 +127,7 @@ func (a *app) newLoginCommand() *cobra.Command {
 			}
 			printWarning(cmd, warning)
 			fmt.Fprintf(cmd.OutOrStdout(), "Saved and activated profile %q. Restart running Codex clients to pick it up.\n", args[0])
+			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
 	}
@@ -144,6 +154,7 @@ func (a *app) newImportCommand() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Imported the active login as profile %q.\n", args[0])
+			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
 	}
@@ -166,6 +177,7 @@ func (a *app) newUseCommand() *cobra.Command {
 			}
 			printWarning(cmd, warning)
 			fmt.Fprintf(cmd.OutOrStdout(), "Now using profile %q. Restart running Codex clients to pick it up.\n", args[0])
+			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
 	}
@@ -232,15 +244,20 @@ func (a *app) newCurrentCommand() *cobra.Command {
 			if current == "" {
 				return errors.New("no profile has been selected")
 			}
+			daemonState := s.Daemon()
 			if asJSON {
 				return writeJSON(cmd.OutOrStdout(), struct {
-					Name    string `json:"name"`
-					Matches bool   `json:"matches"`
-				}{current, matches})
+					Name        string `json:"name"`
+					Matches     bool   `json:"matches"`
+					DaemonStale bool   `json:"daemon_stale"`
+				}{current, matches, daemonState.Stale})
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), current)
 			if !matches {
 				printWarning(cmd, "the active auth.json no longer matches the selected profile")
+			}
+			if daemonState.Stale {
+				printWarning(cmd, fmt.Sprintf("the Codex app-server daemon (pid %d) started before this profile was selected and still uses the previous credentials; run 'codexctl restart-daemon' to reload it (this interrupts active Codex sessions)", daemonState.PID))
 			}
 			return nil
 		},
@@ -299,6 +316,7 @@ func (a *app) newSyncCommand() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Saved the active credentials into profile %q.\n", name)
+			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
 	}
@@ -321,6 +339,7 @@ func (a *app) newRenameCommand() *cobra.Command {
 			}
 			printWarning(cmd, warning)
 			fmt.Fprintf(cmd.OutOrStdout(), "Renamed profile %q to %q.\n", args[0], args[1])
+			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
 	}
@@ -344,6 +363,7 @@ func (a *app) newRemoveCommand() *cobra.Command {
 			}
 			printWarning(cmd, warning)
 			fmt.Fprintf(cmd.OutOrStdout(), "Removed profile %q.\n", args[0])
+			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
 	}
@@ -374,6 +394,7 @@ func (a *app) newLogoutCommand() *cobra.Command {
 			}
 			printWarning(cmd, warning)
 			fmt.Fprintf(cmd.OutOrStdout(), "Logged out and removed profile %q.\n", args[0])
+			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
 	}

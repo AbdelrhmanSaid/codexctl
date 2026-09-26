@@ -210,6 +210,7 @@ func (s *Store) Logout(name string, runLogout func(home string) error) (string, 
 				if err := removeIfExists(s.authPath()); err != nil {
 					return "", fmt.Errorf("logged out, but the active auth.json could not be removed: %w", err)
 				}
+				s.recordSwitch("")
 				warnings = append(warnings, "the active auth.json held the logged-out account and was removed; Codex is now signed out")
 			}
 		}
