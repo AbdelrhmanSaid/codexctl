@@ -57,7 +57,7 @@ func (t *Theme) Table(header []string, rows []Row) string {
 	for i, h := range header {
 		cells[i] = pad(h, widths[i])
 	}
-	b.WriteString("  " + t.Header.Render(strings.TrimRight(strings.Join(cells, "   "), " ")) + "\n")
+	fmt.Fprintf(&b, "  %s\n", t.Header.Render(strings.TrimRight(strings.Join(cells, "   "), " ")))
 	for _, row := range rows {
 		marker := "  "
 		for i, cell := range row.Cells {
@@ -75,7 +75,7 @@ func (t *Theme) Table(header []string, rows []Row) string {
 		case row.Faded:
 			line = t.Muted.Render(line)
 		}
-		b.WriteString(marker + line + "\n")
+		fmt.Fprintf(&b, "%s%s\n", marker, line)
 	}
 	return b.String()
 }
@@ -95,7 +95,7 @@ func (t *Theme) Card(title string, badges []string, fields []Field) string {
 	var b strings.Builder
 	b.WriteString(t.Selected.Render(title))
 	for _, badge := range badges {
-		b.WriteString("  " + t.Badge.Render(badge))
+		fmt.Fprintf(&b, "  %s", t.Badge.Render(badge))
 	}
 	b.WriteString("\n")
 	for _, f := range fields {
@@ -103,7 +103,7 @@ func (t *Theme) Card(title string, badges []string, fields []Field) string {
 		if value == "" {
 			value = t.Muted.Render("-")
 		}
-		b.WriteString("\n" + t.Muted.Render(f.Label+strings.Repeat(" ", width-lipgloss.Width(f.Label))) + "  " + value)
+		fmt.Fprintf(&b, "\n%s  %s", t.Muted.Render(f.Label+strings.Repeat(" ", width-lipgloss.Width(f.Label))), value)
 	}
 	return t.Box.Render(b.String()) + "\n"
 }
@@ -120,18 +120,18 @@ func (t *Theme) Checklist(checks []Check) string {
 	problems := 0
 	for _, c := range checks {
 		if c.OK {
-			b.WriteString(t.OK.Render(glyphOK) + " " + c.Message + "\n")
+			fmt.Fprintf(&b, "%s %s\n", t.OK.Render(glyphOK), c.Message)
 		} else {
 			problems++
-			b.WriteString(t.Warn.Render(glyphWarn) + " " + t.Warn.Render(c.Message) + "\n")
+			fmt.Fprintf(&b, "%s %s\n", t.Warn.Render(glyphWarn), t.Warn.Render(c.Message))
 		}
 	}
 	b.WriteString("\n")
 	passed := len(checks) - problems
 	if problems == 0 {
-		b.WriteString(t.OK.Render(fmt.Sprintf("All %d checks passed.", passed)) + "\n")
+		fmt.Fprintf(&b, "%s\n", t.OK.Render(fmt.Sprintf("All %d checks passed.", passed)))
 	} else {
-		b.WriteString(t.Muted.Render(fmt.Sprintf("%d passed, ", passed)) + t.Warn.Render(fmt.Sprintf("%d need attention.", problems)) + "\n")
+		fmt.Fprintf(&b, "%s%s\n", t.Muted.Render(fmt.Sprintf("%d passed, ", passed)), t.Warn.Render(fmt.Sprintf("%d need attention.", problems)))
 	}
 	return b.String()
 }

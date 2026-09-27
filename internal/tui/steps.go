@@ -143,11 +143,11 @@ func (m *stepsModel) View() string {
 	for i, title := range m.titles {
 		switch m.states[i] {
 		case stepPending:
-			b.WriteString(t.Muted.Render(glyphPending+" "+title) + "\n")
+			fmt.Fprintf(&b, "%s\n", t.Muted.Render(glyphPending+" "+title))
 		case stepDone:
-			b.WriteString(t.OK.Render(glyphOK) + " " + title + "\n")
+			fmt.Fprintf(&b, "%s %s\n", t.OK.Render(glyphOK), title)
 		case stepFailed:
-			b.WriteString(t.Err.Render(glyphFail) + " " + title + "\n")
+			fmt.Fprintf(&b, "%s %s\n", t.Err.Render(glyphFail), title)
 		case stepRunning:
 			line := m.spinner.View() + " " + title
 			if p := m.progress[i]; p >= 0 {
@@ -155,7 +155,7 @@ func (m *stepsModel) View() string {
 			} else if elapsed := time.Since(m.started); elapsed > 3*time.Second {
 				line += " " + t.Muted.Render(fmt.Sprintf("%ds", int(elapsed.Seconds())))
 			}
-			b.WriteString(line + "\n")
+			fmt.Fprintf(&b, "%s\n", line)
 		}
 	}
 	return b.String()

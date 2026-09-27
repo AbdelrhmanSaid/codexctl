@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -98,15 +99,15 @@ func (m inputModel) View() string {
 		return t.answered(m.opts.Title, answer)
 	}
 	var b strings.Builder
-	b.WriteString(t.question(m.opts.Title) + "\n")
+	fmt.Fprintf(&b, "%s\n", t.question(m.opts.Title))
 	for _, line := range m.opts.Description {
-		b.WriteString("  " + t.Muted.Render(line) + "\n")
+		fmt.Fprintf(&b, "  %s\n", t.Muted.Render(line))
 	}
-	b.WriteString("  " + m.input.View() + "\n")
+	fmt.Fprintf(&b, "  %s\n", m.input.View())
 	if m.problem != "" {
-		b.WriteString("  " + t.Warn.Render(glyphWarn+" "+m.problem) + "\n")
+		fmt.Fprintf(&b, "  %s\n", t.Warn.Render(glyphWarn+" "+m.problem))
 	}
-	b.WriteString("\n  " + t.help("enter", "confirm", "esc", "cancel") + "\n")
+	fmt.Fprintf(&b, "\n  %s\n", t.help("enter", "confirm", "esc", "cancel"))
 	return b.String()
 }
 

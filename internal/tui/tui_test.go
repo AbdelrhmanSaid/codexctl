@@ -77,26 +77,26 @@ func TestConfirm(t *testing.T) {
 }
 
 func TestSelectMovesAndFilters(t *testing.T) {
-	m := keys(newList(plainTheme(), "Pick", items("alpha", "beta", "gamma"), false), "down", "enter").(listModel)
+	m := keys(newList(plainTheme(), "Pick", items("alpha", "beta", "gamma"), false), "down", "enter").(*listModel)
 	if !m.done || m.current() != 1 {
 		t.Fatalf("picked %d, want 1", m.current())
 	}
 
-	m = keys(newList(plainTheme(), "Pick", items("alpha", "beta", "gamma"), false), "g", "enter").(listModel)
+	m = keys(newList(plainTheme(), "Pick", items("alpha", "beta", "gamma"), false), "g", "enter").(*listModel)
 	if m.current() != 2 {
 		t.Fatalf("filtered pick %d, want 2", m.current())
 	}
 
-	m = keys(newList(plainTheme(), "Pick", items("alpha", "beta"), false), "z", "enter").(listModel)
+	m = keys(newList(plainTheme(), "Pick", items("alpha", "beta"), false), "z", "enter").(*listModel)
 	if m.done {
 		t.Fatal("picked with nothing matching the filter")
 	}
-	m = keys(m, "esc", "enter").(listModel)
+	m = keys(m, "esc", "enter").(*listModel)
 	if !m.done || m.current() != 0 {
 		t.Fatalf("esc did not clear the filter: done=%v current=%d", m.done, m.current())
 	}
 
-	m = keys(newList(plainTheme(), "Pick", items("alpha"), false), "esc").(listModel)
+	m = keys(newList(plainTheme(), "Pick", items("alpha"), false), "esc").(*listModel)
 	if !m.cancelled {
 		t.Fatal("esc without a filter did not cancel")
 	}
@@ -104,7 +104,7 @@ func TestSelectMovesAndFilters(t *testing.T) {
 
 func TestSelectSkipsDisabled(t *testing.T) {
 	list := []Item{{Label: "a", Disabled: "broken"}, {Label: "b"}}
-	m := keys(newList(plainTheme(), "Pick", list, false), "enter").(listModel)
+	m := keys(newList(plainTheme(), "Pick", list, false), "enter").(*listModel)
 	if m.done {
 		t.Fatal("picked a disabled item")
 	}
@@ -118,22 +118,22 @@ func TestMultiSelect(t *testing.T) {
 	list[2].Checked = true
 	m := newList(plainTheme(), "Pick", list, true)
 	m.min = 1
-	m = keys(m, "space", "down", "down", "space").(listModel)
+	m = keys(m, "space", "down", "down", "space").(*listModel)
 	if got := m.chosen(); len(got) != 1 || got[0] != 0 {
 		t.Fatalf("chosen = %v, want [0]", got)
 	}
 	if !strings.Contains(m.View(), glyphBoxOn+" a") || !strings.Contains(m.View(), glyphBoxOff+" c") {
 		t.Fatalf("checkboxes not drawn:\n%s", m.View())
 	}
-	m = keys(m, "ctrl+a").(listModel)
+	m = keys(m, "ctrl+a").(*listModel)
 	if len(m.chosen()) != 3 {
 		t.Fatalf("ctrl+a checked %v", m.chosen())
 	}
-	m = keys(m, "ctrl+a", "enter").(listModel)
+	m = keys(m, "ctrl+a", "enter").(*listModel)
 	if m.done || !strings.Contains(m.View(), "select at least 1") {
 		t.Fatal("finished with fewer than Min checked")
 	}
-	m = keys(m, "space", "enter").(listModel)
+	m = keys(m, "space", "enter").(*listModel)
 	if !m.done || !strings.Contains(m.View(), "c") {
 		t.Fatalf("did not finish: %s", m.View())
 	}

@@ -50,8 +50,8 @@ type listModel struct {
 	cancelled bool
 }
 
-func newList(t *Theme, title string, items []Item, multi bool) listModel {
-	m := listModel{theme: t, title: title, items: items, multi: multi, checked: make([]bool, len(items))}
+func newList(t *Theme, title string, items []Item, multi bool) *listModel {
+	m := &listModel{theme: t, title: title, items: items, multi: multi, checked: make([]bool, len(items))}
 	for i, item := range items {
 		m.checked[i] = item.Checked && item.Disabled == ""
 	}
@@ -82,14 +82,14 @@ func (m *listModel) moveTo(cursor int) {
 }
 
 // current returns the focused item's index, or -1 when nothing matches.
-func (m listModel) current() int {
+func (m *listModel) current() int {
 	if len(m.visible) == 0 {
 		return -1
 	}
 	return m.visible[m.cursor]
 }
 
-func (m listModel) chosen() []int {
+func (m *listModel) chosen() []int {
 	var out []int
 	for i, on := range m.checked {
 		if on {
@@ -99,9 +99,9 @@ func (m listModel) chosen() []int {
 	return out
 }
 
-func (m listModel) Init() tea.Cmd { return nil }
+func (m *listModel) Init() tea.Cmd { return nil }
 
-func (m listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
@@ -203,7 +203,7 @@ func (m *listModel) toggleAll() {
 	}
 }
 
-func (m listModel) View() string {
+func (m *listModel) View() string {
 	t := m.theme
 	if m.done {
 		if m.cancelled {
@@ -223,40 +223,40 @@ func (m listModel) View() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(t.question(m.title) + "\n")
+	fmt.Fprintf(&b, "%s\n", t.question(m.title))
 	if m.filter != "" {
-		b.WriteString("  " + t.Muted.Render("filter: ") + t.Accent.Render(m.filter) + "\n")
+		fmt.Fprintf(&b, "  %s%s\n", t.Muted.Render("filter: "), t.Accent.Render(m.filter))
 	}
 	width := 0
 	for _, item := range m.items {
 		width = max(width, lipgloss.Width(item.Label))
 	}
 	if len(m.visible) == 0 {
-		b.WriteString("  " + t.Muted.Render("nothing matches") + "\n")
+		fmt.Fprintf(&b, "  %s\n", t.Muted.Render("nothing matches"))
 	}
 	if m.offset > 0 {
-		b.WriteString("  " + t.Muted.Render(fmt.Sprintf("  ↑ %d more", m.offset)) + "\n")
+		fmt.Fprintf(&b, "  %s\n", t.Muted.Render(fmt.Sprintf("  ↑ %d more", m.offset)))
 	}
 	end := min(len(m.visible), m.offset+maxRows)
 	for row := m.offset; row < end; row++ {
-		b.WriteString(m.row(m.visible[row], row == m.cursor, width) + "\n")
+		fmt.Fprintf(&b, "%s\n", m.row(m.visible[row], row == m.cursor, width))
 	}
 	if rest := len(m.visible) - end; rest > 0 {
-		b.WriteString("  " + t.Muted.Render(fmt.Sprintf("  ↓ %d more", rest)) + "\n")
+		fmt.Fprintf(&b, "  %s\n", t.Muted.Render(fmt.Sprintf("  ↓ %d more", rest)))
 	}
 	b.WriteString("\n")
 	if m.problem != "" {
-		b.WriteString("  " + t.Warn.Render(glyphWarn+" "+m.problem) + "\n")
+		fmt.Fprintf(&b, "  %s\n", t.Warn.Render(glyphWarn+" "+m.problem))
 	}
 	if m.multi {
-		b.WriteString("  " + t.help("↑/↓", "move", "space", "toggle", "ctrl+a", "all", "enter", "confirm", "esc", "cancel") + "\n")
+		fmt.Fprintf(&b, "  %s\n", t.help("↑/↓", "move", "space", "toggle", "ctrl+a", "all", "enter", "confirm", "esc", "cancel"))
 	} else {
-		b.WriteString("  " + t.help("↑/↓", "move", "enter", "select", "type", "filter", "esc", "cancel") + "\n")
+		fmt.Fprintf(&b, "  %s\n", t.help("↑/↓", "move", "enter", "select", "type", "filter", "esc", "cancel"))
 	}
 	return b.String()
 }
 
-func (m listModel) row(i int, focused bool, width int) string {
+func (m *listModel) row(i int, focused bool, width int) string {
 	t := m.theme
 	item := m.items[i]
 	cursor := "  "
@@ -309,7 +309,7 @@ func Select(env Env, opts SelectOptions) (int, error) {
 	if err != nil {
 		return -1, err
 	}
-	fm := final.(listModel)
+	fm := final.(*listModel)
 	if fm.cancelled {
 		return -1, ErrCancelled
 	}
@@ -324,7 +324,7 @@ func MultiSelect(env Env, opts MultiSelectOptions) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	fm := final.(listModel)
+	fm := final.(*listModel)
 	if fm.cancelled {
 		return nil, ErrCancelled
 	}

@@ -6,6 +6,7 @@ package tui
 import (
 	"errors"
 	"io"
+	"strings"
 	"sync"
 
 	"github.com/charmbracelet/lipgloss"
@@ -110,14 +111,11 @@ func (e Env) theme() *Theme { return NewTheme(e.Out) }
 
 // help renders a key hint line such as "enter confirm · esc cancel".
 func (t *Theme) help(pairs ...string) string {
-	out := ""
+	hints := make([]string, 0, len(pairs)/2)
 	for i := 0; i+1 < len(pairs); i += 2 {
-		if i > 0 {
-			out += t.Muted.Render(glyphSeparator)
-		}
-		out += t.Key.Render(pairs[i]) + " " + t.Muted.Render(pairs[i+1])
+		hints = append(hints, t.Key.Render(pairs[i])+" "+t.Muted.Render(pairs[i+1]))
 	}
-	return out
+	return strings.Join(hints, t.Muted.Render(glyphSeparator))
 }
 
 // question renders the "? Title" line every prompt starts with.

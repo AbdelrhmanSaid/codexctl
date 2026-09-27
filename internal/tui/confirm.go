@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -72,9 +73,9 @@ func (m confirmModel) View() string {
 		return t.answered(m.opts.Title, answer)
 	}
 	var b strings.Builder
-	b.WriteString(t.question(m.opts.Title) + "\n")
+	fmt.Fprintf(&b, "%s\n", t.question(m.opts.Title))
 	for _, line := range m.opts.Description {
-		b.WriteString("  " + t.Muted.Render(line) + "\n")
+		fmt.Fprintf(&b, "  %s\n", t.Muted.Render(line))
 	}
 	yes, no := t.Button, t.ButtonOn
 	if m.yes {
@@ -83,8 +84,8 @@ func (m confirmModel) View() string {
 			yes = t.Danger
 		}
 	}
-	b.WriteString("\n  " + yes.Render(m.opts.Affirmative) + " " + no.Render(m.opts.Negative) + "\n\n")
-	b.WriteString("  " + t.help("←/→", "switch", "y/n", "choose", "enter", "confirm", "esc", "cancel") + "\n")
+	fmt.Fprintf(&b, "\n  %s %s\n\n", yes.Render(m.opts.Affirmative), no.Render(m.opts.Negative))
+	fmt.Fprintf(&b, "  %s\n", t.help("←/→", "switch", "y/n", "choose", "enter", "confirm", "esc", "cancel"))
 	return b.String()
 }
 

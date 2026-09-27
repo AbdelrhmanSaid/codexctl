@@ -72,7 +72,7 @@ func (s *Store) Login(name string, runLogin func(home string) error) (string, er
 	}
 	loggedIn := filepath.Join(tempHome, "auth.json")
 	if _, err := readAuth(loggedIn); err != nil {
-		return "", fmt.Errorf("Codex did not produce a valid file-backed login: %w", err)
+		return "", fmt.Errorf("codex login did not produce a valid file-backed login: %w", err)
 	}
 	data, err := readFile(loggedIn)
 	if err != nil {
