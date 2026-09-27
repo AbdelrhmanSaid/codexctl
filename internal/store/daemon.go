@@ -9,30 +9,23 @@ import (
 	"github.com/AbdelrhmanSaid/codexctl/internal/daemon"
 )
 
-// switchRecord notes the last time codexctl changed the active auth.json, so
-// a daemon that started earlier can be recognized as still holding the
-// previous account's credentials. It holds no credentials itself.
+// Lets a daemon that started before the last switch be recognized. Holds no
+// credentials.
 type switchRecord struct {
 	CodexHome string    `json:"codex_home"`
 	Profile   string    `json:"profile"`
 	Time      time.Time `json:"time"`
 }
 
-// DaemonState describes the Codex app-server daemon relative to the active
-// auth.json.
 type DaemonState struct {
 	daemon.Status
-	// Stale means the daemon is running and started before codexctl last
-	// changed auth.json, so it still uses the credentials it loaded then.
+	// Stale means running and started before auth.json last changed.
 	Stale bool
-	// Profile is the profile that change activated, or "" if it signed Codex
-	// out. It is only set when Stale is true.
+	// Profile is "" if the change signed Codex out.
 	Profile string
 }
 
-// recordSwitch notes that the active auth.json now holds profile, or was
-// removed when profile is "". The record only feeds daemon diagnostics, so
-// failing to write it does not fail the switch.
+// Only feeds diagnostics, so a failed write does not fail the switch.
 func (op *operation) recordSwitch(profile string) {
 	op.result.AuthChanged = true
 	data, err := json.Marshal(switchRecord{CodexHome: op.CodexHome, Profile: profile, Time: time.Now()})
@@ -42,7 +35,6 @@ func (op *operation) recordSwitch(profile string) {
 	_ = writeFile(op.switchedPath(), append(data, '\n'), 0o600)
 }
 
-// lastSwitch returns the last recorded switch for this Codex home.
 func (s *Store) lastSwitch() (switchRecord, bool) {
 	data, err := readFile(s.switchedPath())
 	if err != nil {
@@ -52,16 +44,13 @@ func (s *Store) lastSwitch() (switchRecord, bool) {
 	if json.Unmarshal(data, &record) != nil || record.Time.IsZero() {
 		return switchRecord{}, false
 	}
-	// The state directory is shared by every CODEX_HOME; a switch made in
-	// another one says nothing about this home's daemon.
+	// The state directory is shared by every CODEX_HOME.
 	if filepath.Clean(record.CodexHome) != filepath.Clean(s.CodexHome) {
 		return switchRecord{}, false
 	}
 	return record, true
 }
 
-// Daemon reports the app-server daemon of this Codex home and whether it
-// predates the last account switch.
 func (s *Store) Daemon() DaemonState {
 	detect := s.DetectDaemon
 	if detect == nil {
@@ -71,8 +60,8 @@ func (s *Store) Daemon() DaemonState {
 	if state.State != daemon.Running {
 		return state
 	}
-	// A daemon whose start time is unknown is assumed to predate the switch:
-	// a needless restart costs less than silently using the wrong account.
+	// An unknown start time counts as stale: a needless restart beats the
+	// wrong account.
 	if record, ok := s.lastSwitch(); ok && (state.StartedAt.IsZero() || state.StartedAt.Before(record.Time)) {
 		state.Stale = true
 		state.Profile = record.Profile

@@ -7,14 +7,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// ConfirmOptions describes a yes/no question.
 type ConfirmOptions struct {
 	Title       string
-	Description []string // lines shown under the title
-	Affirmative string   // label of the yes button; "Yes" when empty
-	Negative    string   // label of the no button; "No" when empty
-	Default     bool     // which button is focused first
-	Danger      bool     // draw the yes button in red
+	Description []string
+	Affirmative string // label of the yes button; "Yes" when empty
+	Negative    string // label of the no button; "No" when empty
+	Default     bool   // which button is focused first
+	Danger      bool   // draw the yes button in red
 }
 
 type confirmModel struct {
@@ -88,7 +87,6 @@ func (m *confirmModel) View() string {
 	return b.String()
 }
 
-// Confirm asks a yes/no question. Esc and Ctrl-C return ErrCancelled.
 func Confirm(env Env, opts ConfirmOptions) (bool, error) {
 	m := newConfirm(env.theme(), opts)
 	if err := ask(env, m); err != nil {

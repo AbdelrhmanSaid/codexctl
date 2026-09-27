@@ -13,7 +13,6 @@ import (
 
 var errNoProfiles = errors.New("no profiles are saved yet; run 'codexctl login PROFILE_NAME' or 'codexctl import PROFILE_NAME' first")
 
-// profileDetail summarizes a profile's account for a list row.
 func profileDetail(p store.Profile) string {
 	if !p.Valid {
 		return "unreadable snapshot"
@@ -33,8 +32,7 @@ func profileDetail(p store.Profile) string {
 	return strings.Join(parts, " · ")
 }
 
-// profileItems adapts saved profiles to list rows. Unless allowInvalid is
-// set, profiles whose snapshot cannot be read are shown but not selectable.
+// Unreadable profiles are shown but not selectable unless allowInvalid.
 func profileItems(profiles []store.Profile, allowInvalid bool) ([]tui.Item, int) {
 	items := make([]tui.Item, len(profiles))
 	cursor := 0
@@ -51,8 +49,6 @@ func profileItems(profiles []store.Profile, allowInvalid bool) ([]tui.Item, int)
 	return items, cursor
 }
 
-// profileArg returns the command's PROFILE_NAME argument. When it was left
-// out on a terminal, the user picks from the saved profiles instead.
 func (a *app) profileArg(cmd *cobra.Command, s *store.Store, args []string, title string, allowInvalid bool) (string, error) {
 	if len(args) > 0 {
 		return args[0], nil
@@ -69,8 +65,6 @@ func (a *app) profileArg(cmd *cobra.Command, s *store.Store, args []string, titl
 	return profiles[i].Name, nil
 }
 
-// profileArgs returns one or more PROFILE_NAME arguments. When none were
-// given on a terminal, the user checks profiles in a list instead.
 func (a *app) profileArgs(cmd *cobra.Command, s *store.Store, args []string, title string) ([]string, error) {
 	if len(args) > 0 {
 		return args, nil
@@ -91,8 +85,6 @@ func (a *app) profileArgs(cmd *cobra.Command, s *store.Store, args []string, tit
 	return names, nil
 }
 
-// profilesToPick returns the saved profiles for a list the user picks from.
-// It fails when there is no terminal to ask on or nothing to pick.
 func (a *app) profilesToPick(cmd *cobra.Command, s *store.Store) ([]store.Profile, error) {
 	if !a.tui {
 		return nil, fmt.Errorf("missing PROFILE_NAME; usage: %s", cmd.UseLine())
@@ -107,9 +99,6 @@ func (a *app) profilesToPick(cmd *cobra.Command, s *store.Store) ([]store.Profil
 	return profiles, nil
 }
 
-// newNameArg returns the argument at index, called argName in usage, as a
-// new profile name. When it was left out on a terminal, the user types one;
-// taken names are refused unless allowExisting is set.
 func (a *app) newNameArg(cmd *cobra.Command, s *store.Store, args []string, index int, argName string, opts tui.InputOptions, allowExisting bool) (string, error) {
 	if len(args) > index {
 		return args[index], nil

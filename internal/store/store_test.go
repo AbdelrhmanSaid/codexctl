@@ -197,8 +197,7 @@ func TestUseAddsFileCredentialStoreToConfig(t *testing.T) {
 	}
 }
 
-// An interrupted switch from b to a wrote auth.json but not current. Without
-// recovery, the next command would see a's credentials under the name b.
+// auth.json was written but not current.
 func interruptedSwitch(t *testing.T) (*Store, []byte, []byte) {
 	t.Helper()
 	s := newTestStore(t)

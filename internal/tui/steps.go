@@ -11,23 +11,20 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Step is one unit of work shown with a spinner while it runs.
 type Step struct {
 	Title string
 	Run   func(r *Reporter) error
 }
 
-// Reporter lets a running step update its line. It is safe to call from the
-// step's goroutine. The zero Reporter discards everything, for running a
-// step without a terminal.
+// Reporter is safe to call from the step's goroutine. The zero Reporter
+// discards everything.
 type Reporter struct {
 	index int
 	send  func(tea.Msg)
 	ctx   context.Context
 }
 
-// Context is cancelled when the user presses Ctrl-C. Steps that can stop
-// early should watch it; the runner waits for the step either way.
+// Context is cancelled on Ctrl-C; the runner waits for the step either way.
 func (r *Reporter) Context() context.Context {
 	if r.ctx == nil {
 		return context.Background()
@@ -35,8 +32,7 @@ func (r *Reporter) Context() context.Context {
 	return r.ctx
 }
 
-// Progress reports how much of the step is done, from 0 to 1. The first call
-// turns the spinner line into a progress bar.
+// Progress turns the spinner into a progress bar on its first call.
 func (r *Reporter) Progress(fraction float64) {
 	if r.send == nil {
 		return
@@ -44,8 +40,6 @@ func (r *Reporter) Progress(fraction float64) {
 	r.send(progressMsg{r.index, max(0, min(fraction, 1))})
 }
 
-// Result replaces the step's title once it has finished, for example with
-// what it found.
 func (r *Reporter) Result(text string) {
 	if r.send == nil {
 		return
@@ -135,8 +129,8 @@ func (m *stepsModel) start(i int) tea.Cmd {
 func (m *stepsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// Stop the step but keep waiting for it, so nothing it does can
-		// overlap with whatever the caller runs next.
+		// Keep waiting for the step, so it cannot overlap with what runs
+		// next.
 		if msg.String() == "ctrl+c" && !m.cancelled {
 			m.cancelled = true
 			m.titles[m.current] += " (stopping…)"
@@ -152,8 +146,7 @@ func (m *stepsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.titles[msg.index] = msg.text
 	case stepDoneMsg:
 		if m.cancelled {
-			// A step that finished anyway did its work; report it as done
-			// and only skip the steps after it.
+			// A step that finished anyway counts as done.
 			m.titles[msg.index] = strings.TrimSuffix(m.titles[msg.index], " (stopping…)")
 			if msg.err != nil {
 				m.states[msg.index] = stepFailed
@@ -204,10 +197,8 @@ func (m *stepsModel) View() string {
 	return b.String()
 }
 
-// RunSteps runs each step in order behind a spinner and stops at the first
-// failure, returning its error. Ctrl-C cancels the running step's context
-// and waits for it to return. If it failed or steps remain, RunSteps returns
-// ErrCancelled; a last step that finished anyway counts as success.
+// RunSteps returns ErrCancelled on Ctrl-C unless the last step finished
+// anyway.
 func RunSteps(env Env, steps ...Step) error {
 	return runSteps(env, newSteps(env.theme(), steps))
 }
@@ -226,9 +217,7 @@ func runSteps(env Env, m *stepsModel) error {
 	return m.err
 }
 
-// Spin runs one step behind a spinner. The spinner line disappears when the
-// step succeeds, since the caller reports the result, and stays marked
-// with ✗ when it fails.
+// Spin clears its line on success, since the caller reports the result.
 func Spin(env Env, title string, run func() error) error {
 	m := newSteps(env.theme(), []Step{{Title: title, Run: func(*Reporter) error { return run() }}})
 	m.transient = true

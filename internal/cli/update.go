@@ -9,8 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// steps runs steps behind spinners on a terminal, or one after another
-// without output otherwise.
 func (a *app) steps(cmd *cobra.Command, steps ...tui.Step) error {
 	if a.tui {
 		return tui.RunSteps(env(cmd), steps...)
@@ -97,8 +95,8 @@ func (a *app) newUpdateCommand() *cobra.Command {
 			var archive, binary []byte
 			err = a.steps(cmd,
 				tui.Step{Title: "Downloading " + asset, Run: func(r *tui.Reporter) error {
-					// Report whole percents only, so a fast download does not
-					// flood the screen with redraws.
+					// Whole percents only, so a fast download does not flood
+					// the screen.
 					shown := -1
 					client.Progress = func(done, total int64) {
 						if percent := int(done * 100 / max(total, 1)); total > 0 && percent != shown {
@@ -136,7 +134,6 @@ func (a *app) newUpdateCommand() *cobra.Command {
 	return cmd
 }
 
-// reportUpdateCheck prints the result of update --check.
 func (a *app) reportUpdateCheck(cmd *cobra.Command, current, latest string, cmp int) {
 	switch {
 	case current == "dev":
@@ -152,7 +149,6 @@ func (a *app) reportUpdateCheck(cmd *cobra.Command, current, latest string, cmp 
 	}
 }
 
-// byteSize renders a size such as "4.2 MB".
 func byteSize(n int) string {
 	const unit = 1024
 	if n < unit {

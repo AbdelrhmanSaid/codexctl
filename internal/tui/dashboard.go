@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// DashboardRow is one profile on the dashboard.
 type DashboardRow struct {
 	Name    string
 	Detail  string // account summary shown beside the name
@@ -19,52 +18,46 @@ type DashboardRow struct {
 	Invalid bool
 }
 
-// Level is how a Note is marked.
 type Level int
 
 const (
-	LevelInfo Level = iota // muted text
+	LevelInfo Level = iota
 	LevelOK
 	LevelWarn
 	LevelFail
 )
 
-// Note is a line of status on the dashboard.
 type Note struct {
 	Text  string
 	Level Level
 }
 
-// Action is a key the dashboard answers to.
 type Action struct {
 	Key      string
 	Label    string
 	NeedsRow bool // only offered when a profile is focused
 }
 
-// DashboardOptions describes the dashboard.
 type DashboardOptions struct {
 	Title    string
-	Subtitle string // muted text beside the title, such as a version
-	Notes    []Note // standing state, shown under the title
+	Subtitle string
+	Notes    []Note // shown under the title
 	Rows     []DashboardRow
-	Results  []Note // what the last action reported, shown under the profiles
+	Results  []Note // what the last action reported
 	Actions  []Action
 	Cursor   int
 }
 
-// DashboardChoice is what the user asked for. Key is empty when they quit.
+// DashboardChoice has an empty Key when the user quit.
 type DashboardChoice struct {
 	Key string
 	Row int
 }
 
-// minRows is how many profiles stay in view when results compete with them
-// for a short terminal.
+// Profiles kept in view when results compete for a short terminal.
 const minRows = 3
 
-// scrollLines is how many lines of a scrolling list say how many profiles
-// are out of view.
+// Lines of a scrolling list that say how many profiles are out of view.
 const scrollLines = 2
 
 type dashboardModel struct {
@@ -112,9 +105,8 @@ func (m *dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View fills the terminal: the title and profiles at the top, the key hints
-// on the last lines, and the last action's results in between. Nothing moves
-// when results come and go.
+// Results fill blank space between the profiles and the key hints, so nothing
+// moves.
 func (m *dashboardModel) View() string {
 	if m.done && m.choice.Key == "" {
 		return ""
@@ -134,8 +126,8 @@ func (m *dashboardModel) View() string {
 	lines = append(lines, m.rows(room)...)
 	lines = append(lines, detail...)
 	if m.done {
-		// An action was chosen. The profiles stay where they are and the
-		// action's prompts get the space under them.
+		// The profiles stay and the action's prompts get the space under
+		// them.
 		return strings.Join(lines, "\n") + "\n\n"
 	}
 	lines = append(lines, results...)
@@ -154,8 +146,7 @@ func (m *dashboardModel) head() []string {
 	return append(lines, "")
 }
 
-// rows draws the profiles in at most room lines, scrolling to keep the
-// focused one in view. A room of zero draws them all.
+// A room of zero draws every profile.
 func (m *dashboardModel) rows(room int) []string {
 	t := m.theme
 	rows := m.opts.Rows
@@ -184,7 +175,6 @@ func (m *dashboardModel) rows(room int) []string {
 	return lines
 }
 
-// more says how many profiles are out of view in one direction.
 func (m *dashboardModel) more(arrow string, count int) string {
 	if count == 0 {
 		return ""
@@ -215,9 +205,8 @@ func (m *dashboardModel) row(row DashboardRow, focused bool, width int) string {
 	return fit(strings.TrimRight(cursor+marker+name+"  "+detail, " "), m.width)
 }
 
-// detail is the line about the focused profile. When any profile has one
-// the line is kept for all of them, so moving between profiles does not
-// shift what follows.
+// Kept for every profile once any has one, so moving does not shift what
+// follows.
 func (m *dashboardModel) detail() []string {
 	for _, row := range m.opts.Rows {
 		if row.Extra != "" {
@@ -238,7 +227,6 @@ func (m *dashboardModel) results() []string {
 	return lines
 }
 
-// clip shortens results to room lines, saying how many were left out.
 func (m *dashboardModel) clip(results []string, room int) []string {
 	switch {
 	case len(results) <= room:
@@ -250,7 +238,6 @@ func (m *dashboardModel) clip(results []string, room int) []string {
 	return append(results[:room-1:room-1], m.theme.Muted.Render(fmt.Sprintf("    … %d more lines", hidden)))
 }
 
-// foot is the key hints: the ones for the focused profile, then the rest.
 func (m *dashboardModel) foot() []string {
 	focused := []string{"↑/↓", "move"}
 	var general []string
@@ -273,28 +260,21 @@ func (m *dashboardModel) foot() []string {
 	return append(lines, indent("  ", m.theme.help(m.width-2, general...))...)
 }
 
-// Screen is the terminal's alternate screen, held for as long as the
-// dashboard is open. The dashboard and the prompts of its actions draw on
-// it, so the dashboard is always in the same place and the scrollback is
-// left as it was.
+// Screen is the alternate screen, held while the dashboard is open so it
+// stays in place.
 type Screen struct {
 	env Env
 }
 
-// OpenScreen switches to the alternate screen. Close switches back.
 func OpenScreen(env Env) *Screen {
 	_, _ = io.WriteString(env.Out, ansi.SetModeAltScreenSaveCursor)
 	return &Screen{env: env}
 }
 
-// Close returns to the screen as it was before OpenScreen.
 func (s *Screen) Close() {
 	_, _ = io.WriteString(s.env.Out, ansi.ResetModeAltScreenSaveCursor)
 }
 
-// Dashboard shows profiles and waits for an action key. It replaces
-// whatever the last action left on the screen. Once an action is chosen the
-// profiles stay in view, and what the action draws goes under them.
 func (s *Screen) Dashboard(opts DashboardOptions) (DashboardChoice, error) {
 	m := &dashboardModel{opts: opts, theme: s.env.theme(), cursor: max(0, min(opts.Cursor, len(opts.Rows)-1))}
 	_, _ = io.WriteString(s.env.Out, ansi.CursorHomePosition+ansi.EraseScreenBelow)

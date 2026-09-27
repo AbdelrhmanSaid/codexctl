@@ -9,9 +9,7 @@ import (
 	"os"
 )
 
-// lockFile falls back to exclusive creation where no OS-level file lock is
-// available. Unlike the other implementations, a crashed process leaves the
-// file behind and it has to be removed by hand.
+// No OS-level lock here: a crashed process leaves the file behind.
 func lockFile(path string) (func(), error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {

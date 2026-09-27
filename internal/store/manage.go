@@ -8,9 +8,7 @@ import (
 	"strings"
 )
 
-// Rename gives a saved profile a new name. If the profile is the selected
-// one, its refreshed credentials are saved first and the selection follows
-// the new name. The active auth.json is not touched.
+// Rename does not touch the active auth.json.
 func (s *Store) Rename(oldName, newName string) (Result, error) {
 	if err := ValidateName(oldName); err != nil {
 		return Result{}, err
@@ -36,8 +34,7 @@ func (s *Store) Rename(oldName, newName string) (Result, error) {
 	if exists {
 		return Result{}, fmt.Errorf("profile %q already exists", newName)
 	}
-	// Preserve token refreshes before the snapshot is copied so the renamed
-	// profile does not lose them.
+	// Save token refreshes before the snapshot is copied.
 	selected := s.selectedName() == oldName
 	if selected {
 		op.warn(s.syncCurrentProfile())
@@ -46,9 +43,8 @@ func (s *Store) Rename(oldName, newName string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	// Copy first, then repoint the selection, then delete the old file. If
-	// the process dies between those steps the selection always names a
-	// profile that exists; at worst the old file lingers as a duplicate.
+	// Copy, repoint, then delete: the selection always names a profile that
+	// exists.
 	if err := writeFile(s.profilePath(newName), data, 0o600); err != nil {
 		return Result{}, fmt.Errorf("save profile %q: %w", newName, err)
 	}
@@ -63,9 +59,7 @@ func (s *Store) Rename(oldName, newName string) (Result, error) {
 	return op.done(newName)
 }
 
-// Remove deletes a saved profile. Removing the selected profile clears the
-// selection but leaves the active auth.json in place, so Codex stays logged
-// in; use `codex logout` to sign out of the account itself.
+// Remove leaves the active auth.json, so Codex stays logged in.
 func (s *Store) Remove(name string) (Result, error) {
 	if err := ValidateName(name); err != nil {
 		return Result{}, err
@@ -109,7 +103,6 @@ func (s *Store) profileExists(name string) (bool, error) {
 	return true, nil
 }
 
-// selectProfile records name as the selected profile.
 func (s *Store) selectProfile(name string) error {
 	if err := writeFile(s.currentPath(), []byte(name+"\n"), 0o600); err != nil {
 		return fmt.Errorf("record current profile: %w", err)
@@ -117,8 +110,7 @@ func (s *Store) selectProfile(name string) error {
 	return nil
 }
 
-// selectedName returns the profile named by the current marker, or "" when
-// there is no valid selection.
+// "" when there is no valid selection.
 func (s *Store) selectedName() string {
 	data, err := readFile(s.currentPath())
 	if err != nil {

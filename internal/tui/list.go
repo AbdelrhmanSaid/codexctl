@@ -8,30 +8,27 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Item is one row of a selection list.
 type Item struct {
-	Label    string // primary text, such as a profile name
-	Detail   string // muted text after the label
+	Label    string
+	Detail   string
 	Badge    string // short tag such as "active"
-	Disabled string // when set, the row cannot be chosen and this says why
-	Checked  bool   // initial state in a multi-select
+	Disabled string // why the row cannot be chosen
+	Checked  bool
 }
 
-// SelectOptions describes a single-choice list.
 type SelectOptions struct {
 	Title  string
 	Items  []Item
-	Cursor int // row focused first
+	Cursor int
 }
 
-// MultiSelectOptions describes a checkbox list.
 type MultiSelectOptions struct {
 	Title string
 	Items []Item
-	Min   int // how many rows must be checked to continue
+	Min   int // rows that must be checked
 }
 
-// maxRows is how many rows a list shows before it scrolls.
+// Rows shown before the list scrolls.
 const maxRows = 8
 
 type listModel struct {
@@ -81,7 +78,7 @@ func (m *listModel) moveTo(cursor int) {
 	m.offset = max(0, min(m.offset, len(m.visible)-maxRows))
 }
 
-// current returns the focused item's index, or -1 when nothing matches.
+// -1 when nothing matches.
 func (m *listModel) current() int {
 	if len(m.visible) == 0 {
 		return -1
@@ -189,8 +186,7 @@ func (m *listModel) toggle(i int) {
 	m.checked[i] = !m.checked[i]
 }
 
-// toggleAll checks every visible row, or unchecks them if all are
-// already checked. Rows hidden by the filter are left alone.
+// Rows hidden by the filter are left alone.
 func (m *listModel) toggleAll() {
 	all := true
 	for _, i := range m.visible {
@@ -297,7 +293,6 @@ func (m *listModel) row(i int, focused bool, width int) string {
 	return fit(strings.TrimRight(line, " "), m.width)
 }
 
-// Select asks the user to pick one item and returns its index.
 func Select(env Env, opts SelectOptions) (int, error) {
 	m := newList(env.theme(), opts.Title, opts.Items, false)
 	for row, i := range m.visible {
@@ -311,7 +306,6 @@ func Select(env Env, opts SelectOptions) (int, error) {
 	return m.current(), nil
 }
 
-// MultiSelect asks the user to check items and returns their indexes.
 func MultiSelect(env Env, opts MultiSelectOptions) ([]int, error) {
 	m := newList(env.theme(), opts.Title, opts.Items, true)
 	m.min = opts.Min

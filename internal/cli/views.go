@@ -15,19 +15,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ErrReported is returned by a command that has already described its
-// failure on screen, so only the exit status is left to set.
+// ErrReported means the failure is already on screen; only the exit status is
+// left.
 var ErrReported = errors.New("failure already reported")
 
-// Every view below prints one thing three ways: JSON when asked, colors
-// and layout on a terminal, and otherwise the plain text scripts rely on.
-// The content is shared; only how it is drawn differs.
-
-// profileColumns are the columns of the verbose profile list.
 var profileColumns = []string{"NAME", "AUTH", "EMAIL", "PLAN", "LAST REFRESH"}
 
-// profileCells is a profile's row under profileColumns, with its last
-// refresh drawn by stamp.
 func profileCells(p store.Profile, stamp func(string) string) []string {
 	auth := p.AuthMode
 	if !p.Valid {
@@ -36,8 +29,6 @@ func profileCells(p store.Profile, stamp func(string) string) []string {
 	return []string{p.Name, auth, p.Email, p.Plan, stamp(p.LastRefresh)}
 }
 
-// profileFields is what is known about a profile's account, with its last
-// refresh drawn by stamp.
 func profileFields(p store.Profile, stamp func(string) string) []tui.Field {
 	return []tui.Field{
 		{Label: "Auth mode", Value: p.AuthMode},
@@ -48,11 +39,8 @@ func profileFields(p store.Profile, stamp func(string) string) []tui.Field {
 	}
 }
 
-// asWritten leaves a timestamp as it was saved, for plain text.
 func asWritten(stamp string) string { return stamp }
 
-// renderProfiles prints the saved profiles: names with account summaries,
-// or with verbose every detail.
 func (a *app) renderProfiles(cmd *cobra.Command, profiles []store.Profile, verbose, asJSON bool) error {
 	out := cmd.OutOrStdout()
 	switch {
@@ -91,7 +79,6 @@ func (a *app) renderProfiles(cmd *cobra.Command, profiles []store.Profile, verbo
 	return w.Flush()
 }
 
-// renderProfile prints one profile's account details.
 func (a *app) renderProfile(cmd *cobra.Command, p store.Profile, asJSON bool) error {
 	out := cmd.OutOrStdout()
 	switch {
@@ -114,8 +101,6 @@ func (a *app) renderProfile(cmd *cobra.Command, p store.Profile, asJSON bool) er
 	return w.Flush()
 }
 
-// renderCurrent prints the selected profile, then warns if the active
-// auth.json or a running daemon no longer agrees with it.
 func (a *app) renderCurrent(cmd *cobra.Command, s *store.Store, name string, matches bool, state store.DaemonState, asJSON bool) error {
 	out := cmd.OutOrStdout()
 	switch {
@@ -146,7 +131,6 @@ func (a *app) renderCurrent(cmd *cobra.Command, s *store.Store, name string, mat
 	return nil
 }
 
-// renderChecks prints what doctor found and fails if any check did.
 func (a *app) renderChecks(cmd *cobra.Command, checks []store.Check, asJSON bool) error {
 	type result struct {
 		Message string `json:"message"`
@@ -161,8 +145,7 @@ func (a *app) renderChecks(cmd *cobra.Command, checks []store.Check, asJSON bool
 		results[i] = result{check.Message, !check.Warning}
 		items[i] = tui.Check{Message: capitalize(check.Message), OK: !check.Warning}
 	}
-	// The dashboard gets the problems first, in case it has no room for
-	// every check.
+	// Problems first, in case the dashboard has no room for every check.
 	for _, level := range []tui.Level{tui.LevelWarn, tui.LevelOK} {
 		for _, item := range items {
 			if item.OK == (level == tui.LevelOK) {
@@ -222,8 +205,6 @@ func orDash(v string) string {
 	return v
 }
 
-// relativeTime renders an RFC 3339 timestamp as a local time and how long
-// ago it was, or returns it unchanged if it does not parse.
 func relativeTime(stamp string) string {
 	at, err := time.Parse(time.RFC3339Nano, stamp)
 	if err != nil {

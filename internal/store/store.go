@@ -21,8 +21,7 @@ var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 type Store struct {
 	CodexHome string
 	StateHome string
-	// DetectDaemon inspects the app-server daemon of a Codex home. Nil means
-	// daemon.Detect; tests substitute a fake.
+	// DetectDaemon is daemon.Detect when nil.
 	DetectDaemon func(codexHome string) daemon.Status
 }
 
@@ -47,8 +46,6 @@ func NewFromEnvironment() (*Store, error) {
 	return &Store{CodexHome: filepath.Clean(codexHome), StateHome: filepath.Clean(stateHome)}, nil
 }
 
-// Login runs codex login in an isolated home, saves the login it produced
-// as a profile and selects it.
 func (s *Store) Login(name string, runLogin func(home string) error) (Result, error) {
 	if err := ValidateName(name); err != nil {
 		return Result{}, err
@@ -75,13 +72,13 @@ func (s *Store) Login(name string, runLogin func(home string) error) (Result, er
 	if err != nil {
 		return Result{}, err
 	}
-	// Do not touch the real Codex home until the isolated login has succeeded
-	// and produced a valid auth.json.
+	// The real Codex home is untouched until the isolated login has
+	// succeeded.
 	if err := op.prepareCodexHome(); err != nil {
 		return Result{}, err
 	}
-	// Save refreshes for the previously selected profile before replacing a
-	// profile with the new login. This ordering also makes re-login safe.
+	// Save the previous profile's refreshes first; this also makes re-login
+	// safe.
 	op.warn(s.syncCurrentProfile())
 	if err := writeFile(s.profilePath(name), data, 0o600); err != nil {
 		return Result{}, fmt.Errorf("save profile: %w", err)
@@ -92,10 +89,7 @@ func (s *Store) Login(name string, runLogin func(home string) error) (Result, er
 	return op.done(name)
 }
 
-// isolatedHome creates a private temporary CODEX_HOME configured for
-// file-backed credentials, in which codex login or logout can run without
-// touching the real Codex home. The caller must hold the lock and remove the
-// directory when done.
+// The caller must hold the lock and remove the directory.
 func (s *Store) isolatedHome() (string, error) {
 	s.removeAbandonedLogins()
 	home, err := os.MkdirTemp(s.StateHome, loginDirPrefix+"*")
@@ -113,9 +107,8 @@ func (s *Store) isolatedHome() (string, error) {
 	return home, nil
 }
 
-// removeAbandonedLogins deletes isolated login homes left by a login that was
-// killed before it could clean up; they may hold credentials. The caller must
-// hold the lock, which guarantees no live login still owns one.
+// Left by a killed login and may hold credentials. The caller must hold the
+// lock.
 func (s *Store) removeAbandonedLogins() {
 	entries, _ := os.ReadDir(s.StateHome)
 	for _, entry := range entries {
@@ -125,7 +118,6 @@ func (s *Store) removeAbandonedLogins() {
 	}
 }
 
-// Use makes a saved profile the active login.
 func (s *Store) Use(name string) (Result, error) {
 	if err := ValidateName(name); err != nil {
 		return Result{}, err
@@ -164,9 +156,8 @@ func (s *Store) loadProfile(name string) ([]byte, error) {
 	return data, nil
 }
 
-// syncCurrentProfile preserves refresh-token changes written by Codex while a
-// profile was active. An account ID mismatch means another tool/login changed
-// auth.json, so overwriting the saved profile would be unsafe.
+// An account mismatch means something else changed auth.json, so the profile
+// is not overwritten.
 func (s *Store) syncCurrentProfile() string {
 	currentBytes, err := readFile(s.currentPath())
 	if err != nil {
@@ -200,7 +191,6 @@ func (s *Store) syncCurrentProfile() string {
 	return ""
 }
 
-// List returns the saved profile names in sorted order and the selected one.
 func (s *Store) List() ([]string, string, error) {
 	entries, err := os.ReadDir(s.profilesDir())
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -286,7 +276,6 @@ func (s *Store) Doctor() []Check {
 	return checks
 }
 
-// ValidateName reports whether name can be used as a profile name.
 func ValidateName(name string) error {
 	if !profileNamePattern.MatchString(name) {
 		return errors.New("profile names must be 1-64 characters using letters, digits, '.', '_' or '-', and must start with a letter or digit")

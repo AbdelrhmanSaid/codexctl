@@ -18,8 +18,7 @@ type authInfo struct {
 	} `json:"tokens"`
 }
 
-// Identity is the non-secret description of a credential file. It never
-// carries tokens or API keys, so it is safe to print.
+// Identity never carries tokens or API keys, so it is safe to print.
 type Identity struct {
 	AuthMode    string `json:"auth_mode,omitempty"`
 	AccountID   string `json:"account_id,omitempty"`
@@ -75,9 +74,7 @@ type idClaims struct {
 	} `json:"https://api.openai.com/auth"`
 }
 
-// idTokenClaims decodes the payload of a JWT without verifying it. The token
-// comes from a local credential file, so it is trusted exactly as much as
-// that file; the claims are only used for display.
+// Decoded without verifying; the claims are only used for display.
 func idTokenClaims(token string) idClaims {
 	var claims idClaims
 	parts := strings.Split(token, ".")
@@ -92,20 +89,17 @@ func idTokenClaims(token string) idClaims {
 	return claims
 }
 
-// accountMatch is the result of comparing two credential files.
 type accountMatch int
 
 const (
-	// accountUnverified means the files differ and at least one has no
-	// account ID, so nothing proves they belong to the same account.
+	// The files differ and at least one has no account ID.
 	accountUnverified accountMatch = iota
 	accountSame
 	accountDifferent
 )
 
-// compareAccounts is the single rule for deciding whether the active auth.json
-// still belongs to a saved profile. Account IDs decide when both files have
-// one; otherwise only byte-identical files count as the same account.
+// Account IDs decide when both files have one; otherwise only identical files
+// match.
 func compareAccounts(active, saved []byte) (accountMatch, error) {
 	a, err := parseAuth(active)
 	if err != nil {

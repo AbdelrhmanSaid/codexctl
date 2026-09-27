@@ -15,8 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// version is replaced with the release tag by GoReleaser. Keep a useful
-// fallback for binaries built directly with `go build` or `go install`.
+// Set to the release tag by GoReleaser.
 var version = "dev"
 
 func buildVersion() string {
@@ -30,36 +29,26 @@ func buildVersion() string {
 	return strings.TrimPrefix(info.Main.Version, "v")
 }
 
-// restartClients is the advice after the active login has changed.
 const restartClients = "Restart running Codex clients to pick it up."
 
-// codexCLI is the part of the Codex CLI that commands depend on.
 type codexCLI interface {
 	Login(home string, opts codex.LoginOptions, stdio codex.Stdio) error
 	Logout(home string, stdio codex.Stdio) error
 	RestartDaemon(home string, stdio codex.Stdio) error
 }
 
-// app holds what commands need from outside the process. The dependencies
-// are resolved lazily so that help never touches the environment;
-// profile-name completion only reads the profile list.
+// app resolves its dependencies lazily, so help never touches the
+// environment.
 type app struct {
-	openStore func() (*store.Store, error)
-	findCodex func() (codexCLI, error)
-	// executable locates the running binary and how it was installed.
-	executable func() (string, update.Method, error)
-	// interactive is whether stdin is a terminal, so commands may ask
-	// before restarting the daemon.
+	openStore   func() (*store.Store, error)
+	findCodex   func() (codexCLI, error)
+	executable  func() (string, update.Method, error)
 	interactive bool
-	// tui is whether prompts may use the full terminal UI: stdin and
-	// stderr are terminals and the UI has not been turned off.
-	tui bool
-	// styledOut and styledErr are whether stdout and stderr get colors
-	// and layout rather than the plain text scripts rely on.
+	// Prompts may use the terminal UI: stdin and stderr are terminals.
+	tui                  bool
 	styledOut, styledErr bool
-	// dashboard is whether the dashboard is open. It draws over what an
-	// action printed, so results holds what the action reported for the
-	// dashboard to show.
+	// Set while the dashboard is open; results is what the last action
+	// reported.
 	dashboard bool
 	results   []tui.Note
 }
@@ -90,8 +79,6 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
-	// Without a subcommand, a terminal gets the dashboard and anything
-	// else gets the help text.
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
 		if !a.tui {
 			return cmd.Help()
@@ -122,7 +109,6 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 	return root
 }
 
-// withStore is the RunE of a command that works on the store.
 func (a *app) withStore(run func(cmd *cobra.Command, s *store.Store, args []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		s, err := a.openStore()
@@ -141,8 +127,7 @@ func (a *app) newLoginCommand() *cobra.Command {
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, args []string) error {
-			// Look for codex before anything else is done, so a missing
-			// install fails before any state is created.
+			// Fail on a missing codex before any state is created.
 			c, err := a.findCodex()
 			if err != nil {
 				return err
@@ -342,8 +327,8 @@ func (a *app) newRemoveCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Names typed on the command line are deliberate; ones checked
-			// in a list get a second look.
+			// Names checked in a list get a second look; typed ones are
+			// deliberate.
 			if len(args) == 0 {
 				if err := confirmDanger(cmd, fmt.Sprintf("Remove %s?", countNoun(len(names), "profile")), "Remove",
 					strings.Join(names, ", "),
@@ -442,7 +427,6 @@ func newCompletionCommand(root *cobra.Command) *cobra.Command {
 	}
 }
 
-// completeProfiles offers saved profile names for a command's first argument.
 func (a *app) completeProfiles(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 	if len(args) != 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp

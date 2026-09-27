@@ -7,8 +7,7 @@ import (
 	"syscall"
 )
 
-// processAlive sends signal 0, which checks for the process without
-// affecting it. EPERM means it exists but belongs to another user.
+// Signal 0 checks without affecting the process; EPERM means it exists.
 func processAlive(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || errors.Is(err, syscall.EPERM)

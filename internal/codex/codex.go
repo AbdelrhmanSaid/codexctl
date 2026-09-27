@@ -9,27 +9,23 @@ import (
 	"strings"
 )
 
-// CLI is a located codex executable.
 type CLI struct {
 	Path string
 }
 
-// LoginOptions selects the `codex login` method. At most one may be set; the
-// zero value is the default browser login.
+// LoginOptions may set at most one method; the zero value is a browser login.
 type LoginOptions struct {
 	DeviceAuth  bool
 	APIKey      bool
 	AccessToken bool
 }
 
-// Stdio is what the child process is attached to.
 type Stdio struct {
 	In  io.Reader
 	Out io.Writer
 	Err io.Writer
 }
 
-// Find locates codex in PATH.
 func Find() (*CLI, error) {
 	path, err := exec.LookPath("codex")
 	if err != nil {
@@ -38,29 +34,21 @@ func Find() (*CLI, error) {
 	return &CLI{Path: path}, nil
 }
 
-// Login runs `codex login` with home as its CODEX_HOME, so the login cannot
-// touch the user's real Codex directory.
+// Login uses home as CODEX_HOME, so the real Codex directory is not touched.
 func (c *CLI) Login(home string, opts LoginOptions, stdio Stdio) error {
 	return c.run(stdio, isolated(home), opts.args()...)
 }
 
-// Logout runs `codex logout` with home as its CODEX_HOME. The caller places
-// the credentials to revoke in that directory, so the user's real Codex
-// directory is never touched.
 func (c *CLI) Logout(home string, stdio Stdio) error {
 	return c.run(stdio, isolated(home), "logout")
 }
 
-// RestartDaemon runs `codex app-server daemon restart` for the daemon of the
-// Codex home at home, which is the only supported way to make it reload
-// auth.json. It interrupts every session running on the daemon. Codex starts
-// a daemon if none is running, so the caller must first check that one is.
+// RestartDaemon interrupts every session. Codex starts a daemon if none is
+// running, so the caller must check first.
 func (c *CLI) RestartDaemon(home string, stdio Stdio) error {
 	return c.run(stdio, setEnv(os.Environ(), "CODEX_HOME", home), "app-server", "daemon", "restart")
 }
 
-// isolated is the environment of a Codex process that keeps everything,
-// its database included, in home.
 func isolated(home string) []string {
 	return setEnv(setEnv(os.Environ(), "CODEX_HOME", home), "CODEX_SQLITE_HOME", home)
 }
@@ -86,8 +74,6 @@ func (o LoginOptions) args() []string {
 	return args
 }
 
-// setEnv returns env with every existing assignment of key replaced by a
-// single key=value entry.
 func setEnv(env []string, key, value string) []string {
 	prefix := key + "="
 	result := make([]string, 0, len(env)+1)

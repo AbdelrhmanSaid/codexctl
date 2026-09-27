@@ -57,8 +57,6 @@ func TestImportRefusals(t *testing.T) {
 	}
 }
 
-// fakeLogout stands in for `codex logout` and records the credentials it was
-// given.
 func fakeLogout(t *testing.T, got *[]byte, err error) func(string) error {
 	return func(home string) error {
 		*got = readBytes(t, filepath.Join(home, "auth.json"))

@@ -11,8 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// findExecutable locates the running codexctl binary and how it was
-// installed.
 func findExecutable() (string, update.Method, error) {
 	exe, err := update.Executable()
 	if err != nil {
@@ -121,8 +119,6 @@ func (a *app) newUninstallCommand() *cobra.Command {
 	return cmd
 }
 
-// chooseUninstall asks which parts to remove with a checkbox list and
-// returns the equivalent --purge and --keep-binary flags.
 func (a *app) chooseUninstall(cmd *cobra.Command, s *store.Store, exe string, packaged bool) (purge, keepBinary bool, err error) {
 	binary := tui.Item{Label: "codexctl executable", Detail: displayPath(exe), Checked: true}
 	if packaged {
@@ -149,7 +145,6 @@ func (a *app) chooseUninstall(cmd *cobra.Command, s *store.Store, exe string, pa
 	return removeState, !removeBinary, nil
 }
 
-// confirmUninstall asks for a final yes before anything is removed.
 func confirmUninstall(cmd *cobra.Command, s *store.Store, exe string, purge bool) error {
 	lines := []string{}
 	if exe != "" {

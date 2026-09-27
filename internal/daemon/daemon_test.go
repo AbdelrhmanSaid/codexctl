@@ -31,18 +31,14 @@ func pidRecord(pid int, startSeconds int64) string {
 	return fmt.Sprintf(`{"pid":%d,"processStartTime":"Sat Sep 26 20:36:51 2026","processIdentity":{"bootId":"b","uniqueId":1,"startSeconds":%d,"startMicroseconds":500000}}`, pid, startSeconds)
 }
 
-// serveControlSocket listens where Detect expects the daemon's control
-// socket and accepts and drops connections, like an idle daemon would. It
-// returns the listener so a test can shut it down early.
 func serveControlSocket(t *testing.T, codexHome string) net.Listener {
 	t.Helper()
 	link := SocketPath(codexHome)
 	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// Unix socket paths are short-limited, and a test's temporary directory
-	// can exceed the limit, so mirror Codex: listen on a short path and
-	// symlink to it. Windows has no such limit and does not need symlinks.
+	// Socket paths are length-limited, so listen on a short path and symlink
+	// to it.
 	path := link
 	if runtime.GOOS != "windows" {
 		dir, err := os.MkdirTemp("", "cx")

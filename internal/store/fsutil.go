@@ -46,8 +46,7 @@ func refuseSymlink(path string) error {
 	return nil
 }
 
-// readFile refuses a symlink at path before reading sensitive state. Keeping
-// this check in one helper makes it harder for new call sites to bypass it.
+// Every read of sensitive state goes through this symlink check.
 func readFile(path string) ([]byte, error) {
 	if err := refuseSymlink(path); err != nil {
 		return nil, err

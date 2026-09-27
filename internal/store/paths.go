@@ -4,7 +4,6 @@ import "path/filepath"
 
 // Files owned by Codex.
 
-// AuthPath is the active Codex credential file.
 func (s *Store) AuthPath() string   { return filepath.Join(s.CodexHome, "auth.json") }
 func (s *Store) configPath() string { return filepath.Join(s.CodexHome, "config.toml") }
 

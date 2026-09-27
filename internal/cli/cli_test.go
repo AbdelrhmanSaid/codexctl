@@ -17,9 +17,6 @@ import (
 	"github.com/AbdelrhmanSaid/codexctl/internal/update"
 )
 
-// fakeCodex stands in for the codex executable. Login writes auth for the
-// named account; RestartDaemon records the Codex home it was asked to
-// restart.
 type fakeCodex struct {
 	restarted  []string
 	restartErr error
@@ -77,7 +74,6 @@ func newHarness(t *testing.T) *harness {
 	return h
 }
 
-// store returns a fresh Store, as every codexctl invocation gets.
 func (h *harness) store() *store.Store {
 	return &store.Store{
 		CodexHome:    h.codexHome,
@@ -260,8 +256,8 @@ func TestCommandsThatKeepAuthDoNotOfferRestart(t *testing.T) {
 	h.seed(t, "a", "b")
 	h.daemon = running(42)
 	for _, args := range [][]string{{"rename", "a", "z"}, {"remove", "z"}, {"sync"}, {"logout", "b"}} {
-		// Logging out the selected profile "b" removes auth.json, which does
-		// count as a change; log out an unselected one instead.
+		// Logging out the selected profile removes auth.json, which is a
+		// change.
 		if args[0] == "logout" {
 			h.seed(t, "c")
 			args = []string{"logout", "b"}

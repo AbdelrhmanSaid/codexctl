@@ -15,13 +15,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// offerDaemonRestart runs after a command that may have changed the active
-// auth.json, and does nothing unless it did. The Codex app-server daemon
-// caches credentials when it starts, so if one is running it still uses the
-// previous account until restarted. A restart interrupts active sessions, so
-// it only happens when the user answers yes on a terminal; scripts get a
-// hint instead. A daemon that is not verifiably running is never restarted,
-// since Codex would start one.
+// A daemon caches credentials when it starts. One that is not verifiably
+// running is never restarted, since Codex would start one.
 func (a *app) offerDaemonRestart(cmd *cobra.Command, s *store.Store, authChanged bool) {
 	if !authChanged {
 		return
@@ -70,8 +65,7 @@ func (a *app) offerDaemonRestart(cmd *cobra.Command, s *store.Store, authChanged
 	}
 }
 
-// confirm asks a yes/no question on stderr and reads one line of stdin.
-// Anything but an explicit yes, including end of input, is no.
+// Anything but an explicit yes is no.
 func confirm(cmd *cobra.Command, question string) bool {
 	fmt.Fprint(cmd.ErrOrStderr(), question)
 	line, err := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
@@ -86,15 +80,13 @@ func confirm(cmd *cobra.Command, question string) bool {
 	return false
 }
 
-// restartDaemon restarts the daemon of the store's Codex home. The caller has
-// checked that one is running.
+// The caller has checked that a daemon is running.
 func (a *app) restartDaemon(cmd *cobra.Command, s *store.Store) error {
 	c, err := a.findCodex()
 	if err != nil {
 		return fmt.Errorf("cannot restart the daemon: %w", err)
 	}
-	// Codex prints a JSON restart result on stdout. The command reports
-	// success itself; only Codex's stderr is kept, for failure diagnostics.
+	// Codex prints a JSON result on stdout; only its stderr is kept.
 	err = a.quietly(cmd, "Restarting the Codex app-server daemon", "", func(stdio codex.Stdio) error {
 		if err := c.RestartDaemon(s.CodexHome, codex.Stdio{Out: io.Discard, Err: stdio.Err}); err != nil {
 			return fmt.Errorf("restarting the Codex app-server daemon failed; check whether it is still running with 'codexctl doctor': %w", err)

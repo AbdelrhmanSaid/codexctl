@@ -8,12 +8,8 @@ import (
 	"path/filepath"
 )
 
-// Purge deletes codexctl's state directory: every saved profile, the
-// selection, and the switch records. The Codex home, including the active
-// auth.json and config.toml, is left alone, so Codex stays logged in.
-//
-// before, when not nil, runs while the lock is held and before anything is
-// deleted; if it fails nothing is removed.
+// Purge leaves the Codex home alone. before runs under the lock; if it fails
+// nothing is removed.
 func (s *Store) Purge(before func() error) error {
 	if _, err := os.Lstat(s.StateHome); errors.Is(err, fs.ErrNotExist) {
 		if before != nil {
@@ -49,8 +45,8 @@ func (s *Store) Purge(before func() error) error {
 			return fmt.Errorf("remove codexctl state: %w", err)
 		}
 	}
-	// The lock file goes last, once released: Windows cannot delete a file
-	// that is open, and nothing is left for a concurrent process to corrupt.
+	// The lock file goes last, once released: Windows cannot delete an open
+	// file.
 	release()
 	released = true
 	if err := os.RemoveAll(s.StateHome); err != nil {

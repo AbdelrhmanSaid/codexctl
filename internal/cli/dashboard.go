@@ -12,10 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// runDashboard shows the profile dashboard until the user quits. It holds
-// the alternate screen throughout. Each action runs the matching subcommand,
-// whose prompts appear under the profiles, and then the dashboard is drawn
-// again with fresh state and what the action reported.
 func (a *app) runDashboard(cmd *cobra.Command) error {
 	screen := tui.OpenScreen(env(cmd))
 	defer screen.Close()
@@ -60,8 +56,6 @@ func (a *app) runDashboard(cmd *cobra.Command) error {
 	}
 }
 
-// dashboardArgs turns a dashboard choice into subcommand arguments, asking
-// first before anything is deleted.
 func (a *app) dashboardArgs(cmd *cobra.Command, choice tui.DashboardChoice, profiles []store.Profile) ([]string, error) {
 	name := ""
 	if choice.Row < len(profiles) {
@@ -98,14 +92,12 @@ func (a *app) dashboardArgs(cmd *cobra.Command, choice tui.DashboardChoice, prof
 	return nil, fmt.Errorf("unknown dashboard action %q", choice.Key)
 }
 
-// runSubcommand runs codexctl with args on the same streams.
 func (a *app) runSubcommand(cmd *cobra.Command, args []string) error {
 	root := a.newRootCommand(cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 	root.SetArgs(args)
 	return root.ExecuteContext(cmd.Context())
 }
 
-// dashboardOptions describes the current state for the dashboard.
 func dashboardOptions(s *store.Store, profiles []store.Profile) tui.DashboardOptions {
 	opts := tui.DashboardOptions{Title: "codexctl", Subtitle: buildVersion()}
 	current, matches, err := s.Current()
@@ -153,7 +145,6 @@ func dashboardOptions(s *store.Store, profiles []store.Profile) tui.DashboardOpt
 	return opts
 }
 
-// profileExtra is the detail line shown for the focused profile.
 func profileExtra(p store.Profile) string {
 	var parts []string
 	if p.AccountID != "" {

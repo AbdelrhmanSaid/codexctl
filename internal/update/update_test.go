@@ -186,8 +186,6 @@ func TestApply(t *testing.T) {
 	}
 }
 
-// TestClientEndToEnd serves a fake release and walks the full path: signed
-// checksums, version discovery, download, checksum verification, extraction.
 func TestClientEndToEnd(t *testing.T) {
 	pub, priv := testKeys(t)
 	binary := []byte("#!/bin/sh\necho new\n")

@@ -9,14 +9,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// InputOptions describes a one-line text question.
 type InputOptions struct {
 	Title       string
 	Description []string
 	Placeholder string
 	Value       string
-	Secret      bool               // mask what is typed, for API keys
-	Validate    func(string) error // checked on every key; enter needs nil
+	Secret      bool
+	Validate    func(string) error // checked on every key
 }
 
 type inputModel struct {
@@ -108,7 +107,6 @@ func (m *inputModel) View() string {
 	return b.String()
 }
 
-// Input asks for one line of text and returns it without surrounding space.
 func Input(env Env, opts InputOptions) (string, error) {
 	m := newInput(env.theme(), opts)
 	if err := ask(env, m); err != nil {

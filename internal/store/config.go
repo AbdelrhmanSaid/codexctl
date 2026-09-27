@@ -25,9 +25,7 @@ func (s *Store) ensureFileCredentials() error {
 
 const credentialStoreKey = "cli_auth_credentials_store"
 
-// findRootCredentialStore scans the root table of a config.toml, which ends at
-// the first [table] header, for the credential store setting. It returns the
-// line index and the raw value, or -1 if the key is not set there.
+// Only the root table, which ends at the first [table] header, is scanned.
 func findRootCredentialStore(lines []string) (int, string) {
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)

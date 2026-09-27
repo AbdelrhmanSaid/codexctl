@@ -7,40 +7,32 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Success renders "✓ message".
 func (t *Theme) Success(message string) string {
 	return t.OK.Render(glyphOK) + " " + message + "\n"
 }
 
-// Warning renders "! message".
 func (t *Theme) Warning(message string) string {
 	return t.Warn.Render(glyphWarn+" "+message) + "\n"
 }
 
-// Failure renders "✗ message".
 func (t *Theme) Failure(message string) string {
 	return t.Err.Render(glyphFail) + " " + message + "\n"
 }
 
-// Hint renders a muted line of advice.
 func (t *Theme) Hint(message string) string {
 	return t.Muted.Render("  "+message) + "\n"
 }
 
-// Name renders a profile or other name in the accent color.
 func (t *Theme) Name(name string) string {
 	return t.Accent.Render(name)
 }
 
-// Row is one line of a Table. Active rows get a dot and the accent color;
-// Faded rows are muted.
 type Row struct {
 	Cells  []string
 	Active bool
 	Faded  bool
 }
 
-// Table renders rows under a header with aligned columns and no borders.
 func (t *Theme) Table(header []string, rows []Row) string {
 	widths := make([]int, len(header))
 	for i, h := range header {
@@ -80,13 +72,11 @@ func (t *Theme) Table(header []string, rows []Row) string {
 	return b.String()
 }
 
-// Field is one label and value in a Card.
 type Field struct {
 	Label string
 	Value string
 }
 
-// Card renders a titled box of fields, with badges beside the title.
 func (t *Theme) Card(title string, badges []string, fields []Field) string {
 	width := 0
 	for _, f := range fields {
@@ -108,13 +98,11 @@ func (t *Theme) Card(title string, badges []string, fields []Field) string {
 	return t.Box.Render(b.String()) + "\n"
 }
 
-// Check is one line of a Checklist.
 type Check struct {
 	Message string
 	OK      bool
 }
 
-// Checklist renders checks as ✓ and ! lines followed by a summary.
 func (t *Theme) Checklist(checks []Check) string {
 	var b strings.Builder
 	problems := 0

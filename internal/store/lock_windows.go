@@ -8,8 +8,7 @@ import (
 
 const errorSharingViolation syscall.Errno = 32
 
-// lockFile opens path with no sharing allowed, so a second open fails for as
-// long as this handle exists. The handle is not inheritable.
+// No sharing is allowed, so a second open fails while this handle exists.
 func lockFile(path string) (func(), error) {
 	name, err := syscall.UTF16PtrFromString(path)
 	if err != nil {

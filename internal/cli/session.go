@@ -14,8 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// chooseLoginMethod asks how to log in and, for a key or token, reads it
-// with a masked input so it never lands in shell history.
+// Secrets are read with a masked input, so they stay out of shell history.
 func (a *app) chooseLoginMethod(cmd *cobra.Command) (codex.LoginOptions, string, error) {
 	methods := []tui.Item{
 		{Label: "Browser", Detail: "sign in with ChatGPT in your web browser"},
@@ -46,9 +45,8 @@ func (a *app) chooseLoginMethod(cmd *cobra.Command) (codex.LoginOptions, string,
 	return opts, secret, nil
 }
 
-// runLogin runs codex login for a profile. A browser or device login keeps
-// the terminal, since Codex prints a link or code to follow; a pasted
-// secret is fed to Codex out of sight.
+// A browser or device login keeps the terminal; a pasted secret is fed out of
+// sight.
 func (a *app) runLogin(cmd *cobra.Command, s *store.Store, c codexCLI, name string, opts codex.LoginOptions, secret string) (store.Result, error) {
 	login := func(stdio codex.Stdio) (store.Result, error) {
 		return s.Login(name, func(home string) error { return c.Login(home, opts, stdio) })
@@ -66,7 +64,6 @@ func (a *app) runLogin(cmd *cobra.Command, s *store.Store, c codexCLI, name stri
 	return result, err
 }
 
-// runLogout runs codex logout for a profile.
 func (a *app) runLogout(cmd *cobra.Command, s *store.Store, c codexCLI, name string) (store.Result, error) {
 	var result store.Result
 	err := a.quietly(cmd, fmt.Sprintf("Logging out of %s", name), "", func(stdio codex.Stdio) error {
@@ -77,15 +74,12 @@ func (a *app) runLogout(cmd *cobra.Command, s *store.Store, c codexCLI, name str
 	return result, err
 }
 
-// commandStdio attaches a Codex process to the command's own streams.
 func commandStdio(cmd *cobra.Command) codex.Stdio {
 	return codex.Stdio{In: cmd.InOrStdin(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}
 }
 
-// quietly runs a Codex process that needs no one at the keyboard. On a
-// terminal it runs behind a spinner, reading input and writing to a buffer;
-// if it fails, what it wrote is added to the error. Without the terminal UI
-// it is attached to the command's own streams.
+// On a terminal the process runs behind a spinner and its output is added to
+// the error if it fails.
 func (a *app) quietly(cmd *cobra.Command, title, input string, run func(stdio codex.Stdio) error) error {
 	if !a.tui {
 		return run(commandStdio(cmd))
@@ -97,9 +91,7 @@ func (a *app) quietly(cmd *cobra.Command, title, input string, run func(stdio co
 	return withOutput(err, &output)
 }
 
-// withOutput adds what Codex printed to an error, since it was hidden
-// behind a spinner. After a cancel the step may still be running, so its
-// output is left alone.
+// After a cancel the step may still be running, so its output is left alone.
 func withOutput(err error, output io.Reader) error {
 	if err == nil || errors.Is(err, tui.ErrCancelled) {
 		return err

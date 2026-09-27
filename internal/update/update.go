@@ -28,25 +28,23 @@ import (
 const (
 	Repo        = "AbdelrhmanSaid/codexctl"
 	releasesURL = "https://github.com/" + Repo + "/releases"
-	// maxDownload bounds every response body; release assets are a few MB.
+	// Bounds every response body.
 	maxDownload = 64 << 20
 )
 
-// Release is one published version and the checksums of its assets.
 type Release struct {
 	Version   string            // without the leading "v"
 	Checksums map[string]string // asset file name -> hex SHA-256
-	baseURL   string            // directory the assets are downloaded from
+	baseURL   string
 }
 
 type Client struct {
 	HTTP      *http.Client
 	UserAgent string
 	PublicKey ed25519.PublicKey
-	// ReleasesURL is the GitHub releases page; tests point it elsewhere.
+	// ReleasesURL is pointed elsewhere by tests.
 	ReleasesURL string
-	// Progress, when set, is told how many bytes of a download have
-	// arrived and the expected total, which is -1 when unknown.
+	// Progress gets a total of -1 when it is unknown.
 	Progress func(done, total int64)
 }
 
@@ -63,13 +61,12 @@ func NewClient(currentVersion string) (*Client, error) {
 	}, nil
 }
 
-// Latest resolves the newest non-prerelease. GitHub redirects the
-// latest/download path, so no API call or rate limit is involved.
+// Latest follows GitHub's latest/download redirect, so no API call is
+// involved.
 func (c *Client) Latest(ctx context.Context) (*Release, error) {
 	return c.release(ctx, c.ReleasesURL+"/latest/download")
 }
 
-// Version resolves one specific release.
 func (c *Client) Version(ctx context.Context, version string) (*Release, error) {
 	return c.release(ctx, c.ReleasesURL+"/download/v"+strings.TrimPrefix(version, "v"))
 }
@@ -94,7 +91,6 @@ func (c *Client) release(ctx context.Context, baseURL string) (*Release, error) 
 	return release, nil
 }
 
-// Download fetches this platform's archive and verifies its checksum.
 func (c *Client) Download(ctx context.Context, release *Release) ([]byte, error) {
 	name := AssetName(release.Version)
 	want, ok := release.Checksums[name]
@@ -143,7 +139,6 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 	return data, nil
 }
 
-// progressReader reports how much of a response body has been read.
 type progressReader struct {
 	r      io.Reader
 	done   int64
@@ -158,8 +153,7 @@ func (p *progressReader) Read(b []byte) (int, error) {
 	return n, err
 }
 
-// parseChecksums reads GoReleaser's checksums.txt. The version is taken from
-// the asset names, which GoReleaser formats as codexctl_VERSION_OS_ARCH.EXT.
+// The version comes from asset names: codexctl_VERSION_OS_ARCH.EXT.
 func parseChecksums(data []byte) (*Release, error) {
 	release := &Release{Checksums: map[string]string{}}
 	for _, line := range strings.Split(string(data), "\n") {
@@ -187,7 +181,6 @@ func parseChecksums(data []byte) (*Release, error) {
 	return release, nil
 }
 
-// AssetName is the archive GoReleaser publishes for this platform.
 func AssetName(version string) string {
 	ext := ".tar.gz"
 	if runtime.GOOS == "windows" {
@@ -196,7 +189,6 @@ func AssetName(version string) string {
 	return "codexctl_" + version + "_" + runtime.GOOS + "_" + runtime.GOARCH + ext
 }
 
-// ExtractBinary returns the codexctl executable stored in a release archive.
 func ExtractBinary(archive []byte, name string) ([]byte, error) {
 	if strings.HasSuffix(name, ".zip") {
 		return extractZip(archive)
@@ -261,8 +253,7 @@ func readLimited(r io.Reader) ([]byte, error) {
 	return data, nil
 }
 
-// Executable returns the real path of the running binary, following any
-// symlink such as the one a manual install into ~/bin might use.
+// Executable follows symlinks, such as one from a manual install into ~/bin.
 func Executable() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -274,10 +265,8 @@ func Executable() (string, error) {
 	return exe, nil
 }
 
-// Apply replaces the executable at exe with binary. The new file is written
-// next to the old one and renamed over it, so the swap is atomic on POSIX.
-// Windows refuses to overwrite a running executable but allows renaming it,
-// so the old file is moved aside first and deleted on a later update.
+// Apply renames the new file into place, which is atomic on POSIX. On Windows
+// the old file is moved aside first.
 func Apply(exe string, binary []byte) error {
 	dir := filepath.Dir(exe)
 	temp, err := os.CreateTemp(dir, ".codexctl-update-*")
@@ -317,7 +306,6 @@ func Apply(exe string, binary []byte) error {
 	return nil
 }
 
-// Method describes how the running binary was installed.
 type Method int
 
 const (
@@ -327,8 +315,7 @@ const (
 	MethodDev     // go build in a checkout
 )
 
-// DetectInstall classifies the running binary. releaseBuild reports whether
-// GoReleaser stamped a version into it.
+// DetectInstall takes whether GoReleaser stamped a version into the binary.
 func DetectInstall(releaseBuild bool, exe string) Method {
 	if !releaseBuild {
 		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
@@ -346,8 +333,7 @@ func DetectInstall(releaseBuild bool, exe string) Method {
 	return MethodRelease
 }
 
-// CompareVersions orders two semantic versions, ignoring a leading "v". A
-// prerelease sorts before the release it precedes.
+// CompareVersions sorts a prerelease before its release.
 func CompareVersions(a, b string) int {
 	coreA, preA, _ := strings.Cut(strings.TrimPrefix(a, "v"), "-")
 	coreB, preB, _ := strings.Cut(strings.TrimPrefix(b, "v"), "-")

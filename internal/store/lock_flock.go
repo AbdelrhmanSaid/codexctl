@@ -8,8 +8,7 @@ import (
 	"syscall"
 )
 
-// lockFile takes a non-blocking exclusive flock on path. The descriptor is
-// close-on-exec, so the codex child process does not inherit the lock.
+// Close-on-exec, so the codex child does not inherit the lock.
 func lockFile(path string) (func(), error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
@@ -29,6 +28,5 @@ func lockFile(path string) (func(), error) {
 		return nil, err
 	}
 	recordHolder(f)
-	// Closing the descriptor releases the lock.
 	return func() { _ = f.Close() }, nil
 }

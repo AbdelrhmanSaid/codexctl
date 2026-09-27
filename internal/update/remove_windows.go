@@ -12,10 +12,8 @@ const (
 	createNoWindow  = 0x08000000
 )
 
-// Remove deletes the executable at exe. Windows refuses to delete a running
-// executable but allows renaming it, so the file is moved aside at once and
-// a detached cmd.exe deletes it after this process has exited. If that
-// helper cannot start, the renamed file is left behind, which is harmless.
+// Remove renames the file, since Windows cannot delete a running executable;
+// a detached cmd.exe deletes it later.
 func Remove(exe string) error {
 	old := exe + ".old"
 	_ = os.Remove(old)

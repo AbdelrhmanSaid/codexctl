@@ -1,11 +1,5 @@
-// Package daemon inspects the shared Codex app-server daemon that Codex
-// v0.157.0 and later starts by default. The daemon loads auth.json once and
-// caches the credentials, so it does not notice when codexctl replaces the
-// file; only a restart makes it reload.
-//
-// Detection is passive: it reads the daemon's pid file and checks that its
-// control socket accepts a connection. It never speaks the app-server
-// protocol, never starts or stops a daemon, and never reads credentials.
+// Package daemon passively detects the Codex app-server daemon, which caches
+// auth.json until it is restarted.
 package daemon
 
 import (
@@ -19,48 +13,37 @@ import (
 	"time"
 )
 
-// State is whether a daemon is running for a Codex home.
 type State int
 
 const (
-	// NotRunning means no daemon pid file exists or its process has exited.
 	NotRunning State = iota
-	// Running means the recorded process is alive and the control socket
-	// accepts connections.
 	Running
-	// Unknown means the evidence is inconsistent, for example a live pid with
-	// no answering socket. A daemon must not be restarted in this state.
+	// Unknown means inconsistent evidence; such a daemon must not be
+	// restarted.
 	Unknown
 )
 
-// Status describes the daemon of one Codex home.
 type Status struct {
 	State State
 	PID   int
-	// StartedAt is when the daemon process started, or zero if that could
-	// not be determined. It is only set when the daemon is running.
+	// StartedAt is zero if it could not be determined.
 	StartedAt time.Time
-	// Reason explains an Unknown state.
-	Reason string
+	Reason    string
 }
 
-// pidFileNames are the files in which Codex records the daemon process. The
-// second is used by installations that still run Codex's standalone package.
+// The second name is used by Codex's standalone package.
 var pidFileNames = []string{"daemon.pid", "app-server.pid"}
 
 func stateDir(codexHome string) string {
 	return filepath.Join(codexHome, "app-server-daemon")
 }
 
-// SocketPath is the daemon's control socket. On Unix it is a symlink to a
-// socket with a short path, since socket paths are limited in length.
+// SocketPath is, on Unix, a symlink to a socket with a short path.
 func SocketPath(codexHome string) string {
 	return filepath.Join(codexHome, "app-server-control", "app-server-control.sock")
 }
 
-// pidFile is the part of Codex's pid record that detection needs. The start
-// time fields are only written on macOS; elsewhere Codex records a
-// platform-specific identity that cannot be turned into a time.
+// The start time fields are only written on macOS.
 type pidFile struct {
 	PID             int `json:"pid"`
 	ProcessIdentity struct {
@@ -69,7 +52,6 @@ type pidFile struct {
 	} `json:"processIdentity"`
 }
 
-// Detect reports whether a daemon is running for codexHome.
 func Detect(codexHome string) Status {
 	result := Status{State: NotRunning}
 	for _, name := range pidFileNames {
@@ -100,11 +82,9 @@ func detectPIDFile(path, socket string) Status {
 		return Status{State: Unknown, Reason: path + " is not a valid daemon pid file"}
 	}
 	if !processAlive(pf.PID) {
-		// A daemon that exited without cleaning up leaves a stale pid file.
 		return Status{State: NotRunning, PID: pf.PID}
 	}
-	// The pid alone could belong to an unrelated process that reused the
-	// number, so also require the control socket to accept a connection.
+	// The pid may have been reused, so the socket must answer too.
 	if err := probeSocket(socket); err != nil {
 		return Status{State: Unknown, PID: pf.PID, Reason: fmt.Sprintf("process %d is alive but the daemon control socket did not answer: %v", pf.PID, err)}
 	}
@@ -118,12 +98,9 @@ func detectPIDFile(path, socket string) Status {
 	return Status{State: Running, PID: pf.PID, StartedAt: started}
 }
 
-// probeSocket connects to the control socket and hangs up without sending
-// anything. Codex's own doctor probes the socket the same way, and the daemon
-// treats the dropped connection as an abandoned client.
+// Connects and hangs up without sending, as Codex's own doctor does.
 func probeSocket(path string) error {
-	// Dial the symlink's target so a long Codex home path does not exceed the
-	// socket path limit.
+	// Dial the symlink's target to stay under the socket path limit.
 	target, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return err

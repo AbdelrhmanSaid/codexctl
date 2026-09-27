@@ -8,31 +8,23 @@ import (
 	"strings"
 )
 
-// Result describes what an operation on the store did.
 type Result struct {
-	// Profile is the profile the operation saved, selected or removed; for
-	// a rename it is the new name.
-	Profile string
-	// Warnings are problems that did not stop the operation.
+	// Profile is the new name for a rename.
+	Profile  string
 	Warnings []string
-	// AuthChanged is whether the active auth.json was changed, including by
-	// finishing an interrupted switch. A running Codex app-server daemon
-	// keeps the credentials it loaded before such a change.
+	// AuthChanged includes finishing an interrupted switch.
 	AuthChanged bool
 }
 
-// operation is a change to the store in progress. It holds the store lock
-// and collects what the change did.
+// Holds the store lock and collects what the change did.
 type operation struct {
 	*Store
-	// release gives up the lock. The caller must call it.
 	release func()
 	result  Result
 }
 
-// open takes the store lock and prepares the state directory. It leaves an
-// interrupted switch alone, for operations that must not touch the Codex
-// home until something else has succeeded.
+// Leaves an interrupted switch alone, for operations that must not touch the
+// Codex home yet.
 func (s *Store) open() (*operation, error) {
 	release, err := s.lock()
 	if err != nil {
@@ -45,7 +37,7 @@ func (s *Store) open() (*operation, error) {
 	return &operation{Store: s, release: release}, nil
 }
 
-// begin is open followed by finishing an interrupted switch.
+// open, then finish an interrupted switch.
 func (s *Store) begin() (*operation, error) {
 	op, err := s.open()
 	if err != nil {
@@ -58,22 +50,17 @@ func (s *Store) begin() (*operation, error) {
 	return op, nil
 }
 
-// warn adds a warning to the result, if there is one.
 func (op *operation) warn(warning string) {
 	if warning != "" {
 		op.result.Warnings = append(op.result.Warnings, warning)
 	}
 }
 
-// done returns the result of an operation that succeeded on profile.
 func (op *operation) done(profile string) (Result, error) {
 	op.result.Profile = profile
 	return op.result, nil
 }
 
-// prepareCodexHome readies the real Codex home for a new active auth.json:
-// it finishes an interrupted switch and makes Codex keep credentials in
-// files.
 func (op *operation) prepareCodexHome() error {
 	if err := op.ensureCodexLayout(); err != nil {
 		return err
@@ -84,9 +71,8 @@ func (op *operation) prepareCodexHome() error {
 	return op.ensureFileCredentials()
 }
 
-// writeActive makes data the active auth.json and name the selected
-// profile. A marker written first lets the next operation finish the switch
-// if this one is interrupted.
+// A marker written first lets the next operation finish an interrupted
+// switch.
 func (op *operation) writeActive(name string, data []byte) error {
 	if err := writeFile(op.pendingPath(), []byte(name+"\n"), 0o600); err != nil {
 		return fmt.Errorf("record pending activation: %w", err)
@@ -118,9 +104,6 @@ func (op *operation) clearPendingActivation() error {
 	return nil
 }
 
-// recoverPendingActivation completes a switch interrupted after its durable
-// marker was written. The caller holds the store lock, so the profile cannot
-// be changed concurrently by another codexctl process.
 func (op *operation) recoverPendingActivation() error {
 	data, err := readFile(op.pendingPath())
 	if errors.Is(err, fs.ErrNotExist) {

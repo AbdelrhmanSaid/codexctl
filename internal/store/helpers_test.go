@@ -12,8 +12,6 @@ import (
 	"testing"
 )
 
-// newTestStore returns a store whose Codex home and state home are private
-// temporary directories.
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	root := t.TempDir()
@@ -23,9 +21,8 @@ func newTestStore(t *testing.T) *Store {
 	}
 }
 
-// chatgptAuth builds a ChatGPT-style auth.json for account. refresh stands in
-// for the token material Codex rewrites when it refreshes a session, so two
-// files for the same account can differ.
+// refresh stands in for token material, so two files for one account can
+// differ.
 func chatgptAuth(t *testing.T, account, refresh string) []byte {
 	t.Helper()
 	return marshalAuth(t, map[string]any{
@@ -40,8 +37,6 @@ func chatgptAuth(t *testing.T, account, refresh string) []byte {
 	})
 }
 
-// apiKeyAuth builds an auth.json that holds only an API key, so it carries no
-// account ID.
 func apiKeyAuth(t *testing.T, key string) []byte {
 	t.Helper()
 	return marshalAuth(t, map[string]any{"OPENAI_API_KEY": key})
@@ -56,7 +51,6 @@ func marshalAuth(t *testing.T, v any) []byte {
 	return data
 }
 
-// fakeIDToken returns an unsigned JWT carrying the claims codexctl displays.
 func fakeIDToken(t *testing.T, email, plan, account string) string {
 	t.Helper()
 	claims, err := json.Marshal(map[string]any{
@@ -73,8 +67,6 @@ func fakeIDToken(t *testing.T, email, plan, account string) string {
 	return enc([]byte(`{"alg":"none"}`)) + "." + enc(claims) + ".sig"
 }
 
-// fakeLogin stands in for `codex login`: it writes data as the isolated
-// home's auth.json.
 func fakeLogin(data []byte) func(string) error {
 	return func(home string) error {
 		return os.WriteFile(filepath.Join(home, "auth.json"), data, 0o600)
@@ -128,8 +120,6 @@ func assertCurrent(t *testing.T, s *Store, want string) {
 	}
 }
 
-// assertWarning checks that the result warns about want, or about nothing
-// when want is empty.
 func assertWarning(t *testing.T, result Result, want string) {
 	t.Helper()
 	warning := strings.Join(result.Warnings, "; ")
@@ -141,8 +131,6 @@ func assertWarning(t *testing.T, result Result, want string) {
 	}
 }
 
-// assertNoIsolatedHomes checks that no temporary login home, which may hold
-// credentials, was left in the state directory.
 func assertNoIsolatedHomes(t *testing.T, s *Store) {
 	t.Helper()
 	entries, err := os.ReadDir(s.StateHome)

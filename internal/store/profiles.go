@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 )
 
-// Profile describes a saved profile without exposing its credentials.
 type Profile struct {
 	Name     string `json:"name"`
 	Selected bool   `json:"selected"`
@@ -16,7 +15,6 @@ type Profile struct {
 	Identity
 }
 
-// Profiles returns every saved profile with its identity, sorted by name.
 func (s *Store) Profiles() ([]Profile, error) {
 	names, current, err := s.List()
 	if err != nil {
@@ -36,7 +34,6 @@ func (s *Store) Profiles() ([]Profile, error) {
 	return profiles, nil
 }
 
-// Show returns the identity of one saved profile.
 func (s *Store) Show(name string) (Profile, error) {
 	if err := ValidateName(name); err != nil {
 		return Profile{}, err
@@ -54,9 +51,7 @@ func (s *Store) Show(name string) (Profile, error) {
 	}, nil
 }
 
-// Import saves the active auth.json as a new profile and selects it. It is
-// meant for accounts that were logged in with plain `codex login` before
-// codexctl was installed.
+// Import is for accounts logged in with plain `codex login`.
 func (s *Store) Import(name string) (Result, error) {
 	if err := ValidateName(name); err != nil {
 		return Result{}, err
@@ -100,8 +95,6 @@ func (s *Store) Import(name string) (Result, error) {
 	return op.done(name)
 }
 
-// profileForAccount returns the name of the saved profile that holds the
-// same account as data, or "" if none does.
 func (s *Store) profileForAccount(data []byte) (string, error) {
 	names, _, err := s.List()
 	if err != nil {
@@ -119,8 +112,6 @@ func (s *Store) profileForAccount(data []byte) (string, error) {
 	return "", nil
 }
 
-// Sync saves credential refreshes from the active auth.json into the selected
-// profile.
 func (s *Store) Sync() (Result, error) {
 	op, err := s.begin()
 	if err != nil {
@@ -137,11 +128,8 @@ func (s *Store) Sync() (Result, error) {
 	return op.done(name)
 }
 
-// Logout runs `codex logout` for a saved profile inside an isolated home, so
-// the session is revoked without touching the real Codex home, then deletes
-// the profile. If the profile was selected and the active auth.json holds
-// the same account, that file is removed as well, since its tokens are no
-// longer usable.
+// Logout revokes the session in an isolated home, then deletes the profile
+// and an active auth.json of the same account.
 func (s *Store) Logout(name string, runLogout func(home string) error) (Result, error) {
 	if err := ValidateName(name); err != nil {
 		return Result{}, err

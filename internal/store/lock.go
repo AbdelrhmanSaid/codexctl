@@ -7,17 +7,10 @@ import (
 	"strings"
 )
 
-// errLockHeld is returned by lockFile when another process holds the lock.
 var errLockHeld = errors.New("lock is held")
 
-// lock takes the store-wide lock and returns a function that releases it.
-//
-// The lock is an OS-level lock on the open lock file rather than the file's
-// existence, so it goes away with the process that holds it: a crash, kill or
-// Ctrl-C during an interactive `codex login` cannot leave a stale lock behind.
-// The file itself is only removed by Purge (removing it would let two
-// processes lock different files of the same name) and its contents are only
-// informational.
+// An OS-level lock on the open file, so it goes away with the process. The
+// file is only removed by Purge.
 func (s *Store) lock() (func(), error) {
 	if err := refuseSymlink(s.StateHome); err != nil {
 		return nil, err
@@ -39,15 +32,13 @@ func (s *Store) lock() (func(), error) {
 	return release, nil
 }
 
-// recordHolder notes the current process in a lock file it has just locked.
 func recordHolder(f *os.File) {
 	if f.Truncate(0) == nil {
 		_, _ = f.WriteAt(fmt.Appendf(nil, "%d\n", os.Getpid()), 0)
 	}
 }
 
-// lockHolder describes the process recorded in a held lock file, if it can be
-// read; on Windows the holder's exclusive handle prevents that.
+// On Windows the holder's exclusive handle prevents reading it.
 func lockHolder(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {

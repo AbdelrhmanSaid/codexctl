@@ -1,6 +1,5 @@
-// Package tui draws codexctl's interactive prompts and styled output with
-// Bubble Tea and Lip Gloss. It knows nothing about profiles or Codex; the
-// cli package decides when a terminal is interactive and adapts its data.
+// Package tui draws codexctl's prompts and styled output. It knows nothing
+// about profiles or Codex.
 package tui
 
 import (
@@ -15,7 +14,6 @@ import (
 	"github.com/charmbracelet/x/term"
 )
 
-// ErrCancelled is returned when the user leaves a prompt with Esc or Ctrl-C.
 var ErrCancelled = errors.New("cancelled")
 
 var (
@@ -27,7 +25,6 @@ var (
 	faint  = lipgloss.AdaptiveColor{Light: "#D0D7DE", Dark: "#30363D"}
 )
 
-// Glyphs used across screens.
 const (
 	glyphOK        = "✓"
 	glyphFail      = "✗"
@@ -43,8 +40,7 @@ const (
 	glyphSeparator = " · "
 )
 
-// Theme is a set of styles bound to one output stream. Colors are chosen
-// for that stream, so a pipe, a dumb terminal or NO_COLOR gets plain text.
+// Theme is bound to one output stream, so a pipe or NO_COLOR gets plain text.
 type Theme struct {
 	r *lipgloss.Renderer
 
@@ -71,11 +67,9 @@ var (
 	dark     bool
 )
 
-// NewTheme returns styles for output written to w.
 func NewTheme(w io.Writer) *Theme {
 	r := lipgloss.NewRenderer(w)
-	// Asking the terminal for its background color takes a round trip and
-	// can swallow keys typed meanwhile, so ask once per process.
+	// Asking for the background color can swallow typed keys, so ask once.
 	darkOnce.Do(func() { dark = lipgloss.HasDarkBackground() })
 	r.SetHasDarkBackground(dark)
 	button := r.NewStyle().Padding(0, 2).Foreground(muted)
@@ -103,8 +97,7 @@ func NewTheme(w io.Writer) *Theme {
 	}
 }
 
-// Env is where an interactive program reads keys and draws. Out is normally
-// stderr, so a command's stdout stays clean for its result.
+// Env is where a program reads keys and draws; Out is normally stderr.
 type Env struct {
 	In  io.Reader
 	Out io.Writer
@@ -112,8 +105,7 @@ type Env struct {
 
 func (e Env) theme() *Theme { return NewTheme(e.Out) }
 
-// size returns the width and height of the terminal behind w, or zeros when
-// w is not a terminal.
+// Zeros when w is not a terminal.
 func size(w io.Writer) (width, height int) {
 	f, ok := w.(*os.File)
 	if !ok {
@@ -126,8 +118,7 @@ func size(w io.Writer) (width, height int) {
 	return width, height
 }
 
-// wrap breaks text into lines of at most width columns. A width of zero or
-// less means the width is not known and leaves the text as it is.
+// A width of zero or less means unknown and leaves the text alone.
 func wrap(text string, width int) []string {
 	if width > 0 {
 		text = ansi.Wrap(text, width, "")
@@ -135,8 +126,6 @@ func wrap(text string, width int) []string {
 	return strings.Split(text, "\n")
 }
 
-// fit shortens a line that is wider than width columns and ends it with an
-// ellipsis. A width of zero or less leaves the line as it is.
 func fit(line string, width int) string {
 	if width <= 0 {
 		return line
@@ -144,7 +133,6 @@ func fit(line string, width int) string {
 	return ansi.Truncate(line, width, "…")
 }
 
-// indent starts every line with prefix.
 func indent(prefix string, lines []string) []string {
 	out := make([]string, len(lines))
 	for i, line := range lines {
@@ -153,9 +141,6 @@ func indent(prefix string, lines []string) []string {
 	return out
 }
 
-// help renders key hints such as "enter confirm · esc cancel". Hints that do
-// not fit in width columns move to the next line; a width of zero or less
-// keeps them on one.
 func (t *Theme) help(width int, pairs ...string) []string {
 	separator := t.Muted.Render(glyphSeparator)
 	var lines []string
@@ -180,9 +165,7 @@ func (t *Theme) help(width int, pairs ...string) []string {
 	return lines
 }
 
-// note renders a note as lines of at most width columns: a glyph for its
-// level, then the text, with wrapped lines lined up under it. A plain note
-// has no glyph and starts at the edge unless gutter is set.
+// A plain note has no glyph and starts at the edge unless gutter is set.
 func (t *Theme) note(n Note, width int, gutter bool) []string {
 	style, glyph := t.Muted, ""
 	switch n.Level {
@@ -208,12 +191,10 @@ func (t *Theme) note(n Note, width int, gutter bool) []string {
 	return lines
 }
 
-// question renders the "? Title" line every prompt starts with.
 func (t *Theme) question(title string) string {
 	return t.Accent.Render(glyphPrompt) + " " + t.Title.Render(title)
 }
 
-// answered renders a finished prompt as one line that stays in scrollback.
 func (t *Theme) answered(title, answer string) string {
 	if !strings.HasSuffix(title, "?") {
 		title += ":"
@@ -221,7 +202,6 @@ func (t *Theme) answered(title, answer string) string {
 	return t.OK.Render(glyphOK) + " " + t.Title.Render(title) + " " + t.Accent.Render(answer) + "\n"
 }
 
-// abandoned renders a prompt the user cancelled.
 func (t *Theme) abandoned(title string) string {
 	return t.Muted.Render(glyphFail+" "+title) + " " + t.Muted.Render("cancelled") + "\n"
 }

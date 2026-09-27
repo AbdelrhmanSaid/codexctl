@@ -108,8 +108,6 @@ func TestLogoutRecordsSignOut(t *testing.T) {
 	assertSwitch(t, s, "")
 }
 
-// Any operation can finish an interrupted switch, and must say that it
-// changed auth.json when it does.
 func TestFinishingInterruptedSwitchRecordsIt(t *testing.T) {
 	operations := map[string]func(s *Store) (Result, error){
 		"sync":   (*Store).Sync,
