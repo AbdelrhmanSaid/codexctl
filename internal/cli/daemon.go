@@ -134,14 +134,11 @@ func (a *app) newRestartDaemonCommand() *cobra.Command {
 				return err
 			}
 			var state store.DaemonState
-			detect := func() error {
+			if err := a.busy(cmd, "Looking for the Codex app-server daemon", func() error {
 				state = s.Daemon()
 				return nil
-			}
-			if a.tui {
-				_ = tui.Spin(env(cmd), "Looking for the Codex app-server daemon", detect)
-			} else {
-				_ = detect()
+			}); err != nil {
+				return err
 			}
 			switch state.State {
 			case daemon.NotRunning:

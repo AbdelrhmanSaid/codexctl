@@ -210,3 +210,14 @@ func TestRenderers(t *testing.T) {
 		}
 	}
 }
+
+func TestSpinClearsItsLineOnSuccess(t *testing.T) {
+	var out bytes.Buffer
+	if err := Spin(Env{In: strings.NewReader(""), Out: &out}, "working", func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	final := out.String()
+	if i := strings.LastIndex(final, "working"); i >= 0 && strings.Contains(final[i:], glyphOK) {
+		t.Fatalf("spinner left a finished line:\n%q", final)
+	}
+}

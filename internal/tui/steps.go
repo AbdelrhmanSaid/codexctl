@@ -71,6 +71,8 @@ type stepsModel struct {
 	current   int
 	err       error
 	cancelled bool
+	finished  bool
+	transient bool // clear the lines once every step has succeeded
 	send      func(tea.Msg)
 }
 
@@ -97,6 +99,7 @@ func (m *stepsModel) Init() tea.Cmd {
 
 func (m *stepsModel) start(i int) tea.Cmd {
 	if i >= len(m.steps) {
+		m.finished = true
 		return tea.Quit
 	}
 	m.current = i
@@ -138,6 +141,9 @@ func (m *stepsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *stepsModel) View() string {
+	if m.transient && m.finished {
+		return ""
+	}
 	t := m.theme
 	var b strings.Builder
 	for i, title := range m.titles {
@@ -165,7 +171,10 @@ func (m *stepsModel) View() string {
 // failure, returning its error. Ctrl-C stops waiting and returns
 // ErrCancelled; the interrupted step is not undone.
 func RunSteps(env Env, steps ...Step) error {
-	m := newSteps(env.theme(), steps)
+	return runSteps(env, newSteps(env.theme(), steps))
+}
+
+func runSteps(env Env, m *stepsModel) error {
 	p := tea.NewProgram(m, tea.WithInput(env.In), tea.WithOutput(env.Out))
 	m.send = p.Send
 	if _, err := p.Run(); err != nil {
@@ -177,7 +186,11 @@ func RunSteps(env Env, steps ...Step) error {
 	return m.err
 }
 
-// Spin runs one step behind a spinner.
+// Spin runs one step behind a spinner. The spinner line disappears when the
+// step succeeds, since the caller reports the result, and stays marked
+// with ✗ when it fails.
 func Spin(env Env, title string, run func() error) error {
-	return RunSteps(env, Step{Title: title, Run: func(*Reporter) error { return run() }})
+	m := newSteps(env.theme(), []Step{{Title: title, Run: func(*Reporter) error { return run() }}})
+	m.transient = true
+	return runSteps(env, m)
 }

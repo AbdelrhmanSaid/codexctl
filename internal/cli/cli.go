@@ -236,6 +236,10 @@ func (a *app) newListCommand() *cobra.Command {
 			if asJSON {
 				return writeJSON(out, profiles)
 			}
+			if a.styledOut {
+				printProfiles(cmd, profiles, verbose)
+				return nil
+			}
 			if !verbose {
 				for _, p := range profiles {
 					fmt.Fprintln(out, marker(p.Selected)+p.Name)
@@ -285,12 +289,16 @@ func (a *app) newCurrentCommand() *cobra.Command {
 					DaemonStale bool   `json:"daemon_stale"`
 				}{current, matches, daemonState.Stale})
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), current)
+			if a.styledOut {
+				printCurrent(cmd, s, current)
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), current)
+			}
 			if !matches {
-				printWarning(cmd, "the active auth.json no longer matches the selected profile")
+				a.warn(cmd, "the active auth.json no longer matches the selected profile")
 			}
 			if daemonState.Stale {
-				printWarning(cmd, fmt.Sprintf("the Codex app-server daemon (pid %d) started before this profile was selected and still uses the previous credentials; run 'codexctl restart-daemon' to reload it (this interrupts active Codex sessions)", daemonState.PID))
+				a.warn(cmd, fmt.Sprintf("the Codex app-server daemon (pid %d) started before this profile was selected and still uses the previous credentials; run 'codexctl restart-daemon' to reload it (this interrupts active Codex sessions)", daemonState.PID))
 			}
 			return nil
 		},
@@ -323,6 +331,10 @@ func (a *app) newShowCommand() *cobra.Command {
 			if asJSON {
 				return writeJSON(out, p)
 			}
+			if a.styledOut {
+				printProfileCard(cmd, p)
+				return nil
+			}
 			w := tabwriter.NewWriter(out, 0, 0, 1, ' ', 0)
 			fmt.Fprintf(w, "Name:\t%s\n", p.Name)
 			fmt.Fprintf(w, "Selected:\t%s\n", yesNo(p.Selected))
@@ -352,7 +364,8 @@ func (a *app) newSyncCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Saved the active credentials into profile %q.\n", name)
+			a.success(cmd, "Saved the active credentials into profile "+a.name(cmd, name), "",
+				fmt.Sprintf("Saved the active credentials into profile %q.", name))
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -501,25 +514,43 @@ func (a *app) newDoctorCommand() *cobra.Command {
 				Message string `json:"message"`
 				OK      bool   `json:"ok"`
 			}
+			var checks []store.Check
+			if err := a.busy(cmd, "Checking configuration and profiles", func() error {
+				checks = s.Doctor()
+				return nil
+			}); err != nil {
+				return err
+			}
 			failed := false
 			results := []result{}
-			for _, check := range s.Doctor() {
+			for _, check := range checks {
 				if check.Warning {
 					failed = true
 				}
 				results = append(results, result{check.Message, !check.Warning})
 			}
-			if asJSON {
-				if err := writeJSON(cmd.OutOrStdout(), results); err != nil {
+			out := cmd.OutOrStdout()
+			switch {
+			case asJSON:
+				if err := writeJSON(out, results); err != nil {
 					return err
 				}
-			} else {
+			case a.styledOut:
+				items := make([]tui.Check, len(results))
+				for i, r := range results {
+					items[i] = tui.Check{Message: capitalize(r.Message), OK: r.OK}
+				}
+				fmt.Fprint(out, outTheme(cmd).Checklist(items))
+				if failed {
+					return ErrReported
+				}
+			default:
 				for _, r := range results {
 					status := "ok"
 					if !r.OK {
 						status = "warn"
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "%-4s %s\n", status, r.Message)
+					fmt.Fprintf(out, "%-4s %s\n", status, r.Message)
 				}
 			}
 			if failed {

@@ -106,3 +106,11 @@ func capitalize(message string) string {
 	r, size := utf8.DecodeRuneInString(message)
 	return string(unicode.ToUpper(r)) + message[size:]
 }
+
+// busy runs work behind a spinner on a terminal, or directly otherwise.
+func (a *app) busy(cmd *cobra.Command, title string, work func() error) error {
+	if !a.tui {
+		return work()
+	}
+	return tui.Spin(env(cmd), title, work)
+}
