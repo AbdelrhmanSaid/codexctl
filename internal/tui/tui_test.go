@@ -65,7 +65,7 @@ func TestConfirm(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := keys(newConfirm(plainTheme(), ConfirmOptions{Title: "Restart?", Default: tt.def}), tt.presses...).(confirmModel)
+			m := keys(newConfirm(plainTheme(), ConfirmOptions{Title: "Restart?", Default: tt.def}), tt.presses...).(*confirmModel)
 			if !m.done || m.yes != tt.yes {
 				t.Fatalf("done=%v yes=%v, want done yes=%v", m.done, m.yes, tt.yes)
 			}
@@ -147,15 +147,15 @@ func TestInputValidates(t *testing.T) {
 		}
 		return nil
 	}})
-	m = keys(m, "enter").(inputModel)
+	m = keys(m, "enter").(*inputModel)
 	if m.done {
 		t.Fatal("accepted an empty value")
 	}
-	m = keys(m, "work", "enter").(inputModel)
+	m = keys(m, "work", "enter").(*inputModel)
 	if m.done || !strings.Contains(m.View(), "taken") {
 		t.Fatalf("accepted an invalid value: %s", m.View())
 	}
-	m = keys(m, "backspace", "backspace", "backspace", "backspace", "desk", "enter").(inputModel)
+	m = keys(m, "backspace", "backspace", "backspace", "backspace", "desk", "enter").(*inputModel)
 	if !m.done || m.input.Value() != "desk" {
 		t.Fatalf("value = %q, done = %v", m.input.Value(), m.done)
 	}
@@ -257,5 +257,48 @@ func TestDashboard(t *testing.T) {
 	view := m.View()
 	if strings.Contains(view, "use") || !strings.Contains(view, "No profiles yet") {
 		t.Fatalf("empty dashboard view:\n%s", view)
+	}
+}
+
+func TestSelectAllOnlyTouchesFilteredRows(t *testing.T) {
+	m := newList(plainTheme(), "Pick", items("work", "workshop", "home"), true)
+	m = keys(m, "work", "ctrl+a").(*listModel)
+	if got := m.chosen(); len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("chosen = %v, want only the filtered rows [0 1]", got)
+	}
+}
+
+func TestRunStepsWaitsForCancelledStep(t *testing.T) {
+	var out bytes.Buffer
+	finished := false
+	err := RunSteps(Env{In: strings.NewReader("\x03"), Out: &out},
+		Step{Title: "slow", Run: func(r *Reporter) error {
+			<-r.Context().Done()
+			finished = true
+			return r.Context().Err()
+		}},
+		Step{Title: "never", Run: func(*Reporter) error {
+			t.Error("a step ran after cancelling")
+			return nil
+		}},
+	)
+	if !errors.Is(err, ErrCancelled) {
+		t.Fatalf("err = %v, want ErrCancelled", err)
+	}
+	if !finished {
+		t.Fatal("RunSteps returned before the cancelled step finished")
+	}
+}
+
+func TestCancelledStepThatFinishesCountsAsDone(t *testing.T) {
+	var out bytes.Buffer
+	err := RunSteps(Env{In: strings.NewReader("\x03"), Out: &out},
+		Step{Title: "stubborn", Run: func(r *Reporter) error {
+			<-r.Context().Done()
+			return nil
+		}},
+	)
+	if err != nil {
+		t.Fatalf("err = %v, want nil for a step that completed", err)
 	}
 }

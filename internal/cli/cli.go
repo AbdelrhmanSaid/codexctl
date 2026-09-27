@@ -86,7 +86,6 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 	}
 	// Without a subcommand, a terminal gets the dashboard and anything
 	// else gets the help text.
-	root.Args = cobra.NoArgs
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
 		if !a.tui {
 			return cmd.Help()
@@ -135,7 +134,7 @@ func (a *app) newLoginCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			name, err := a.newNameArg(cmd, s, args, 0, tui.InputOptions{
+			name, err := a.newNameArg(cmd, s, args, 0, "PROFILE_NAME", tui.InputOptions{
 				Title:       "Name for this login",
 				Description: []string{"Letters, digits, '.', '_' and '-'. Reusing a name logs that profile in again."},
 				Placeholder: "work",
@@ -179,7 +178,7 @@ func (a *app) newImportCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			name, err := a.newNameArg(cmd, s, args, 0, tui.InputOptions{
+			name, err := a.newNameArg(cmd, s, args, 0, "PROFILE_NAME", tui.InputOptions{
 				Title:       "Name for the current Codex login",
 				Placeholder: "personal",
 			}, false)
@@ -396,7 +395,7 @@ func (a *app) newRenameCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			newName, err := a.newNameArg(cmd, s, args, 1, tui.InputOptions{
+			newName, err := a.newNameArg(cmd, s, args, 1, "NEW_NAME", tui.InputOptions{
 				Title:       fmt.Sprintf("New name for %s", oldName),
 				Placeholder: oldName,
 			}, false)
@@ -435,18 +434,10 @@ func (a *app) newRemoveCommand() *cobra.Command {
 			// Names typed on the command line are deliberate; ones checked
 			// in a list get a second look.
 			if len(args) == 0 {
-				remove, err := tui.Confirm(env(cmd), tui.ConfirmOptions{
-					Title: fmt.Sprintf("Remove %s?", countNoun(len(names), "profile")),
-					Description: []string{
-						strings.Join(names, ", "),
-						"Saved logins cannot be recovered. The active auth.json is left in place.",
-					},
-					Affirmative: "Remove",
-					Negative:    "Cancel",
-					Danger:      true,
-				})
-				if err != nil || !remove {
-					return tui.ErrCancelled
+				if err := confirmDanger(cmd, fmt.Sprintf("Remove %s?", countNoun(len(names), "profile")), "Remove",
+					strings.Join(names, ", "),
+					"Saved logins cannot be recovered. The active auth.json is left in place."); err != nil {
+					return err
 				}
 			}
 			for _, name := range names {
@@ -484,15 +475,9 @@ func (a *app) newLogoutCommand() *cobra.Command {
 				return err
 			}
 			if len(args) == 0 {
-				logout, err := tui.Confirm(env(cmd), tui.ConfirmOptions{
-					Title:       fmt.Sprintf("Log out of %s?", name),
-					Description: []string{"This ends the account's session and deletes the profile."},
-					Affirmative: "Log out",
-					Negative:    "Cancel",
-					Danger:      true,
-				})
-				if err != nil || !logout {
-					return tui.ErrCancelled
+				if err := confirmDanger(cmd, fmt.Sprintf("Log out of %s?", name), "Log out",
+					"This ends the account's session and deletes the profile."); err != nil {
+					return err
 				}
 			}
 			warning, err := a.runLogout(cmd, s, c, name)

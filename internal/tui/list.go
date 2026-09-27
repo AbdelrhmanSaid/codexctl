@@ -189,15 +189,17 @@ func (m *listModel) toggle(i int) {
 	m.checked[i] = !m.checked[i]
 }
 
+// toggleAll checks every visible row, or unchecks them if all are
+// already checked. Rows hidden by the filter are left alone.
 func (m *listModel) toggleAll() {
 	all := true
-	for i, item := range m.items {
-		if item.Disabled == "" && !m.checked[i] {
+	for _, i := range m.visible {
+		if m.items[i].Disabled == "" && !m.checked[i] {
 			all = false
 		}
 	}
-	for i, item := range m.items {
-		if item.Disabled == "" {
+	for _, i := range m.visible {
+		if m.items[i].Disabled == "" {
 			m.checked[i] = !all
 		}
 	}
@@ -305,28 +307,24 @@ func Select(env Env, opts SelectOptions) (int, error) {
 			m.moveTo(row)
 		}
 	}
-	final, err := run(env, m)
-	if err != nil {
+	if _, err := run(env, m); err != nil {
 		return -1, err
 	}
-	fm := final.(*listModel)
-	if fm.cancelled {
+	if m.cancelled {
 		return -1, ErrCancelled
 	}
-	return fm.current(), nil
+	return m.current(), nil
 }
 
 // MultiSelect asks the user to check items and returns their indexes.
 func MultiSelect(env Env, opts MultiSelectOptions) ([]int, error) {
 	m := newList(env.theme(), opts.Title, opts.Items, true)
 	m.min = opts.Min
-	final, err := run(env, m)
-	if err != nil {
+	if _, err := run(env, m); err != nil {
 		return nil, err
 	}
-	fm := final.(*listModel)
-	if fm.cancelled {
+	if m.cancelled {
 		return nil, ErrCancelled
 	}
-	return fm.chosen(), nil
+	return m.chosen(), nil
 }

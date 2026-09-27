@@ -62,8 +62,8 @@ func (a *app) newUninstallCommand() *cobra.Command {
 
 			if a.tui {
 				if !yes {
-					if ok, err := a.confirmUninstall(cmd, s, exe, purge); err != nil || !ok {
-						return tui.ErrCancelled
+					if err := confirmUninstall(cmd, s, exe, purge); err != nil {
+						return err
 					}
 				}
 			} else {
@@ -126,14 +126,12 @@ func (a *app) newUninstallCommand() *cobra.Command {
 // returns the equivalent --purge and --keep-binary flags.
 func (a *app) chooseUninstall(cmd *cobra.Command, s *store.Store, exe string, packaged bool) (purge, keepBinary bool, err error) {
 	binary := tui.Item{Label: "codexctl executable", Detail: displayPath(exe), Checked: true}
-	if exe == "" {
-		binary.Disabled = "cannot locate the executable"
-	} else if packaged {
+	if packaged {
 		binary.Disabled = "installed by a package manager; remove it with that"
 	}
 	detail := displayPath(s.StateHome)
-	if names, _, err := s.List(); err == nil {
-		detail += fmt.Sprintf(" · %d saved profile(s)", len(names))
+	if names, _, listErr := s.List(); listErr == nil {
+		detail += " · " + countNoun(len(names), "saved profile")
 	}
 	state := tui.Item{Label: "Saved profiles and state", Detail: detail}
 	chosen, err := tui.MultiSelect(env(cmd), tui.MultiSelectOptions{
@@ -153,7 +151,7 @@ func (a *app) chooseUninstall(cmd *cobra.Command, s *store.Store, exe string, pa
 }
 
 // confirmUninstall asks for a final yes before anything is removed.
-func (a *app) confirmUninstall(cmd *cobra.Command, s *store.Store, exe string, purge bool) (bool, error) {
+func confirmUninstall(cmd *cobra.Command, s *store.Store, exe string, purge bool) error {
 	lines := []string{}
 	if exe != "" {
 		lines = append(lines, "Removes "+displayPath(exe))
@@ -162,11 +160,5 @@ func (a *app) confirmUninstall(cmd *cobra.Command, s *store.Store, exe string, p
 		lines = append(lines, "Deletes every saved profile in "+displayPath(s.StateHome)+"; saved logins cannot be recovered")
 	}
 	lines = append(lines, "Codex stays logged in with the active "+displayPath(s.AuthPath()))
-	return tui.Confirm(env(cmd), tui.ConfirmOptions{
-		Title:       "Uninstall codexctl?",
-		Description: lines,
-		Affirmative: "Uninstall",
-		Negative:    "Cancel",
-		Danger:      true,
-	})
+	return confirmDanger(cmd, "Uninstall codexctl?", "Uninstall", lines...)
 }

@@ -11,9 +11,11 @@ func TestRootWithoutTerminalPrintsHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertContains(t, stdout, "Usage:")
-	if _, _, err := h.run(t, "", "nonsense"); err == nil {
+	_, _, err = h.run(t, "", "lst")
+	if err == nil {
 		t.Fatal("an unknown command succeeded")
 	}
+	assertContains(t, err.Error(), "Did you mean this?")
 }
 
 func TestDashboardOptions(t *testing.T) {

@@ -103,15 +103,15 @@ func (a *app) profileArgs(cmd *cobra.Command, s *store.Store, args []string, tit
 	return names, nil
 }
 
-// newNameArg returns the argument at index as a new profile name. When it
-// was left out on a terminal, the user types one; taken names are refused
-// unless allowExisting is set.
-func (a *app) newNameArg(cmd *cobra.Command, s *store.Store, args []string, index int, opts tui.InputOptions, allowExisting bool) (string, error) {
+// newNameArg returns the argument at index, called argName in usage, as a
+// new profile name. When it was left out on a terminal, the user types one;
+// taken names are refused unless allowExisting is set.
+func (a *app) newNameArg(cmd *cobra.Command, s *store.Store, args []string, index int, argName string, opts tui.InputOptions, allowExisting bool) (string, error) {
 	if len(args) > index {
 		return args[index], nil
 	}
 	if !a.tui {
-		return "", fmt.Errorf("missing PROFILE_NAME; usage: %s", cmd.UseLine())
+		return "", fmt.Errorf("missing %s; usage: %s", argName, cmd.UseLine())
 	}
 	names, _, err := s.List()
 	if err != nil {

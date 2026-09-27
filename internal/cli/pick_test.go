@@ -9,12 +9,25 @@ import (
 func TestMissingProfileNameOutsideTerminal(t *testing.T) {
 	h := newHarness(t)
 	h.seed(t, "work")
-	for _, args := range [][]string{{"use"}, {"show"}, {"remove"}, {"logout"}, {"rename", "work"}, {"login"}, {"import"}} {
-		_, _, err := h.run(t, "", args...)
+	tests := []struct {
+		args    []string
+		missing string
+	}{
+		{[]string{"use"}, "PROFILE_NAME"},
+		{[]string{"show"}, "PROFILE_NAME"},
+		{[]string{"remove"}, "PROFILE_NAME"},
+		{[]string{"logout"}, "PROFILE_NAME"},
+		{[]string{"rename"}, "PROFILE_NAME"},
+		{[]string{"rename", "work"}, "NEW_NAME"},
+		{[]string{"login"}, "PROFILE_NAME"},
+		{[]string{"import"}, "PROFILE_NAME"},
+	}
+	for _, tt := range tests {
+		_, _, err := h.run(t, "", tt.args...)
 		if err == nil {
-			t.Fatalf("%v without a name succeeded", args)
+			t.Fatalf("%v without a name succeeded", tt.args)
 		}
-		assertContains(t, err.Error(), "missing PROFILE_NAME")
+		assertContains(t, err.Error(), "missing "+tt.missing)
 	}
 }
 

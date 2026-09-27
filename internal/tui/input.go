@@ -28,7 +28,7 @@ type inputModel struct {
 	cancelled bool
 }
 
-func newInput(t *Theme, opts InputOptions) inputModel {
+func newInput(t *Theme, opts InputOptions) *inputModel {
 	in := textinput.New()
 	in.Prompt = t.Cursor.Render(glyphCursor) + " "
 	in.Placeholder = opts.Placeholder
@@ -41,12 +41,12 @@ func newInput(t *Theme, opts InputOptions) inputModel {
 		in.EchoCharacter = '•'
 	}
 	in.Focus()
-	return inputModel{opts: opts, theme: t, input: in}
+	return &inputModel{opts: opts, theme: t, input: in}
 }
 
-func (m inputModel) Init() tea.Cmd { return textinput.Blink }
+func (m *inputModel) Init() tea.Cmd { return textinput.Blink }
 
-func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "ctrl+c", "esc":
@@ -74,7 +74,7 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m inputModel) check(value string) error {
+func (m *inputModel) check(value string) error {
 	if value == "" {
 		return errEmpty
 	}
@@ -86,7 +86,7 @@ func (m inputModel) check(value string) error {
 
 var errEmpty = errors.New("a value is required")
 
-func (m inputModel) View() string {
+func (m *inputModel) View() string {
 	t := m.theme
 	if m.done {
 		if m.cancelled {
@@ -113,13 +113,12 @@ func (m inputModel) View() string {
 
 // Input asks for one line of text and returns it without surrounding space.
 func Input(env Env, opts InputOptions) (string, error) {
-	final, err := run(env, newInput(env.theme(), opts))
-	if err != nil {
+	m := newInput(env.theme(), opts)
+	if _, err := run(env, m); err != nil {
 		return "", err
 	}
-	fm := final.(inputModel)
-	if fm.cancelled {
+	if m.cancelled {
 		return "", ErrCancelled
 	}
-	return fm.input.Value(), nil
+	return m.input.Value(), nil
 }

@@ -38,7 +38,7 @@ func (a *app) runDashboard(cmd *cobra.Command) error {
 			err = a.runSubcommand(cmd, args)
 		}
 		if err != nil && !errors.Is(err, tui.ErrCancelled) && !errors.Is(err, ErrReported) {
-			fmt.Fprint(cmd.ErrOrStderr(), errTheme(cmd).Failure(err.Error()))
+			PrintError(cmd.ErrOrStderr(), err)
 		}
 		fmt.Fprintln(cmd.ErrOrStderr())
 	}
@@ -57,14 +57,14 @@ func (a *app) dashboardArgs(cmd *cobra.Command, choice tui.DashboardChoice, prof
 	case "r":
 		return []string{"rename", name}, nil
 	case "d":
-		if err := confirmDanger(cmd, fmt.Sprintf("Remove profile %s?", name),
-			"Its saved login cannot be recovered. The active auth.json is left in place.", "Remove"); err != nil {
+		if err := confirmDanger(cmd, fmt.Sprintf("Remove profile %s?", name), "Remove",
+			"Its saved login cannot be recovered. The active auth.json is left in place."); err != nil {
 			return nil, err
 		}
 		return []string{"remove", name}, nil
 	case "l":
-		if err := confirmDanger(cmd, fmt.Sprintf("Log out of %s?", name),
-			"This ends the account's session and deletes the profile.", "Log out"); err != nil {
+		if err := confirmDanger(cmd, fmt.Sprintf("Log out of %s?", name), "Log out",
+			"This ends the account's session and deletes the profile."); err != nil {
 			return nil, err
 		}
 		return []string{"logout", name}, nil
@@ -80,21 +80,6 @@ func (a *app) dashboardArgs(cmd *cobra.Command, choice tui.DashboardChoice, prof
 		return []string{"update"}, nil
 	}
 	return nil, fmt.Errorf("unknown dashboard action %q", choice.Key)
-}
-
-// confirmDanger asks a red yes/no question and returns ErrCancelled on no.
-func confirmDanger(cmd *cobra.Command, title, description, affirmative string) error {
-	ok, err := tui.Confirm(env(cmd), tui.ConfirmOptions{
-		Title:       title,
-		Description: []string{description},
-		Affirmative: affirmative,
-		Negative:    "Cancel",
-		Danger:      true,
-	})
-	if err != nil || !ok {
-		return tui.ErrCancelled
-	}
-	return nil
 }
 
 // runSubcommand runs codexctl with args on the same streams.

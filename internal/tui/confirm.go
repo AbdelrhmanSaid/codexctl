@@ -25,19 +25,19 @@ type confirmModel struct {
 	cancelled bool
 }
 
-func newConfirm(t *Theme, opts ConfirmOptions) confirmModel {
+func newConfirm(t *Theme, opts ConfirmOptions) *confirmModel {
 	if opts.Affirmative == "" {
 		opts.Affirmative = "Yes"
 	}
 	if opts.Negative == "" {
 		opts.Negative = "No"
 	}
-	return confirmModel{opts: opts, theme: t, yes: opts.Default}
+	return &confirmModel{opts: opts, theme: t, yes: opts.Default}
 }
 
-func (m confirmModel) Init() tea.Cmd { return nil }
+func (m *confirmModel) Init() tea.Cmd { return nil }
 
-func (m confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
@@ -60,7 +60,7 @@ func (m confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m confirmModel) View() string {
+func (m *confirmModel) View() string {
 	t := m.theme
 	if m.done {
 		if m.cancelled {
@@ -89,13 +89,16 @@ func (m confirmModel) View() string {
 	return b.String()
 }
 
-// Confirm asks a yes/no question. Esc and Ctrl-C answer no.
+// Confirm asks a yes/no question. Esc and Ctrl-C return ErrCancelled.
 func Confirm(env Env, opts ConfirmOptions) (bool, error) {
-	final, err := run(env, newConfirm(env.theme(), opts))
-	if err != nil {
+	m := newConfirm(env.theme(), opts)
+	if _, err := run(env, m); err != nil {
 		return false, err
 	}
-	return final.(confirmModel).yes, nil
+	if m.cancelled {
+		return false, ErrCancelled
+	}
+	return m.yes, nil
 }
 
 // run starts an inline program, never in the alternate screen, so every

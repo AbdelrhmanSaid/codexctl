@@ -44,12 +44,13 @@ func (a *app) offerDaemonRestart(cmd *cobra.Command, s *store.Store) {
 			},
 			Affirmative: "Restart now",
 			Negative:    "Later",
+			Danger:      true,
 		})
 		if err != nil || !restart {
 			fmt.Fprint(errOut, errTheme(cmd).Hint("Run 'codexctl restart-daemon' when you are ready."))
 			return
 		}
-		if err := a.restartDaemon(cmd, s); err != nil {
+		if err := a.restartDaemon(cmd, s); err != nil && !errors.Is(err, tui.ErrCancelled) {
 			a.warn(cmd, err.Error())
 		}
 		return
@@ -147,15 +148,9 @@ func (a *app) newRestartDaemonCommand() *cobra.Command {
 				return fmt.Errorf("refusing to restart: cannot tell whether a Codex app-server daemon is running: %s", state.Reason)
 			}
 			if a.tui && !yes {
-				restart, err := tui.Confirm(env(cmd), tui.ConfirmOptions{
-					Title:       fmt.Sprintf("Restart the Codex app-server daemon (pid %d)?", state.PID),
-					Description: []string{"This interrupts every active Codex session; a turn in progress may be lost."},
-					Affirmative: "Restart",
-					Negative:    "Cancel",
-					Danger:      true,
-				})
-				if err != nil || !restart {
-					return tui.ErrCancelled
+				if err := confirmDanger(cmd, fmt.Sprintf("Restart the Codex app-server daemon (pid %d)?", state.PID), "Restart",
+					"This interrupts every active Codex session; a turn in progress may be lost."); err != nil {
+					return err
 				}
 				return a.restartDaemon(cmd, s)
 			}

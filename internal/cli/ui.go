@@ -119,6 +119,9 @@ func countNoun(n int, noun string) string {
 // capitalize upper-cases the first letter of a message that is shown on its
 // own rather than after a "warning:" prefix.
 func capitalize(message string) string {
+	if message == "" {
+		return message
+	}
 	r, size := utf8.DecodeRuneInString(message)
 	return string(unicode.ToUpper(r)) + message[size:]
 }
@@ -129,4 +132,23 @@ func (a *app) busy(cmd *cobra.Command, title string, work func() error) error {
 		return work()
 	}
 	return tui.Spin(env(cmd), title, work)
+}
+
+// confirmDanger asks a yes/no question with a red yes button and returns
+// ErrCancelled unless the user agrees.
+func confirmDanger(cmd *cobra.Command, title, affirmative string, description ...string) error {
+	ok, err := tui.Confirm(env(cmd), tui.ConfirmOptions{
+		Title:       title,
+		Description: description,
+		Affirmative: affirmative,
+		Negative:    "Cancel",
+		Danger:      true,
+	})
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return tui.ErrCancelled
+	}
+	return nil
 }

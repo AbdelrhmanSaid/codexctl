@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -22,6 +23,16 @@ type Step struct {
 type Reporter struct {
 	index int
 	send  func(tea.Msg)
+	ctx   context.Context
+}
+
+// Context is cancelled when the user presses Ctrl-C. Steps that can stop
+// early should watch it; the runner waits for the step either way.
+func (r *Reporter) Context() context.Context {
+	if r.ctx == nil {
+		return context.Background()
+	}
+	return r.ctx
 }
 
 // Progress reports how much of the step is done, from 0 to 1. The first call
@@ -81,6 +92,8 @@ type stepsModel struct {
 	finished  bool
 	transient bool // clear the lines once every step has succeeded
 	send      func(tea.Msg)
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 func newSteps(t *Theme, steps []Step) *stepsModel {
@@ -113,7 +126,7 @@ func (m *stepsModel) start(i int) tea.Cmd {
 	m.states[i] = stepRunning
 	m.started = time.Now()
 	step := m.steps[i]
-	reporter := &Reporter{index: i, send: m.send}
+	reporter := &Reporter{index: i, send: m.send, ctx: m.ctx}
 	return func() tea.Msg {
 		return stepDoneMsg{i, step.Run(reporter)}
 	}
@@ -122,10 +135,12 @@ func (m *stepsModel) start(i int) tea.Cmd {
 func (m *stepsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		// Stop the step but keep waiting for it, so nothing it does can
+		// overlap with whatever the caller runs next.
+		if msg.String() == "ctrl+c" && !m.cancelled {
 			m.cancelled = true
-			m.states[m.current] = stepFailed
-			return m, tea.Quit
+			m.titles[m.current] += " (stopping…)"
+			m.cancel()
 		}
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -136,6 +151,21 @@ func (m *stepsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case resultMsg:
 		m.titles[msg.index] = msg.text
 	case stepDoneMsg:
+		if m.cancelled {
+			// A step that finished anyway did its work; report it as done
+			// and only skip the steps after it.
+			m.titles[msg.index] = strings.TrimSuffix(m.titles[msg.index], " (stopping…)")
+			if msg.err != nil {
+				m.states[msg.index] = stepFailed
+				return m, tea.Quit
+			}
+			m.states[msg.index] = stepDone
+			if msg.index+1 == len(m.steps) {
+				m.cancelled = false
+				m.finished = true
+			}
+			return m, tea.Quit
+		}
 		if msg.err != nil {
 			m.states[msg.index] = stepFailed
 			m.err = msg.err
@@ -175,13 +205,16 @@ func (m *stepsModel) View() string {
 }
 
 // RunSteps runs each step in order behind a spinner and stops at the first
-// failure, returning its error. Ctrl-C stops waiting and returns
-// ErrCancelled; the interrupted step is not undone.
+// failure, returning its error. Ctrl-C cancels the running step's context
+// and waits for it to return. If it failed or steps remain, RunSteps returns
+// ErrCancelled; a last step that finished anyway counts as success.
 func RunSteps(env Env, steps ...Step) error {
 	return runSteps(env, newSteps(env.theme(), steps))
 }
 
 func runSteps(env Env, m *stepsModel) error {
+	m.ctx, m.cancel = context.WithCancel(context.Background())
+	defer m.cancel()
 	p := tea.NewProgram(m, tea.WithInput(env.In), tea.WithOutput(env.Out))
 	m.send = p.Send
 	if _, err := p.Run(); err != nil {

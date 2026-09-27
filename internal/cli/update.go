@@ -43,8 +43,6 @@ func (a *app) newUpdateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx := cmd.Context()
-
 			var release *update.Release
 			lookup := "Checking for the latest release"
 			if target != "" {
@@ -53,9 +51,9 @@ func (a *app) newUpdateCommand() *cobra.Command {
 			if err := a.steps(cmd, tui.Step{Title: lookup, Run: func(r *tui.Reporter) error {
 				var err error
 				if target == "" {
-					release, err = client.Latest(ctx)
+					release, err = client.Latest(r.Context())
 				} else {
-					release, err = client.Version(ctx, target)
+					release, err = client.Version(r.Context(), target)
 				}
 				if err == nil {
 					r.Result(fmt.Sprintf("Found codexctl %s with a valid signature", release.Version))
@@ -101,14 +99,18 @@ func (a *app) newUpdateCommand() *cobra.Command {
 			var archive, binary []byte
 			err = a.steps(cmd,
 				tui.Step{Title: "Downloading " + asset, Run: func(r *tui.Reporter) error {
+					// Report whole percents only, so a fast download does not
+					// flood the screen with redraws.
+					shown := -1
 					client.Progress = func(done, total int64) {
-						if total > 0 {
+						if percent := int(done * 100 / max(total, 1)); total > 0 && percent != shown {
+							shown = percent
 							r.Progress(float64(done) / float64(total))
 						}
 					}
 					defer func() { client.Progress = nil }()
 					var err error
-					archive, err = client.Download(ctx, release)
+					archive, err = client.Download(r.Context(), release)
 					if err == nil {
 						r.Result(fmt.Sprintf("Downloaded %s (%s) and verified its checksum", asset, byteSize(len(archive))))
 					}
