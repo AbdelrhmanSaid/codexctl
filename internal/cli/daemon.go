@@ -2,24 +2,18 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/AbdelrhmanSaid/codexctl/internal/codex"
 	"github.com/AbdelrhmanSaid/codexctl/internal/daemon"
 	"github.com/AbdelrhmanSaid/codexctl/internal/store"
+	"github.com/AbdelrhmanSaid/codexctl/internal/tui"
 
 	"github.com/spf13/cobra"
 )
-
-// isTerminal reports whether f is an interactive terminal, in which case a
-// command may ask a question before restarting the daemon.
-func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
-}
 
 // offerDaemonRestart runs after a command that may have changed the active
 // auth.json. The Codex app-server daemon caches credentials when it starts,
@@ -38,6 +32,25 @@ func (a *app) offerDaemonRestart(cmd *cobra.Command, s *store.Store) {
 		return
 	case daemon.Unknown:
 		printWarning(cmd, "cannot tell whether a Codex app-server daemon is running: "+state.Reason+"; if one is, run 'codexctl restart-daemon' so it reloads the new credentials")
+		return
+	}
+	if a.tui {
+		restart, err := tui.Confirm(env(cmd), tui.ConfirmOptions{
+			Title: "Restart the Codex app-server daemon now?",
+			Description: []string{
+				fmt.Sprintf("It is running (pid %d) and still uses the previous credentials.", state.PID),
+				"Restarting loads the new ones but interrupts every active Codex session.",
+			},
+			Affirmative: "Restart now",
+			Negative:    "Later",
+		})
+		if err != nil || !restart {
+			fmt.Fprint(errOut, errTheme(cmd).Hint("Run 'codexctl restart-daemon' when you are ready."))
+			return
+		}
+		if err := a.restartDaemon(cmd, s); err != nil {
+			a.warn(cmd, err.Error())
+		}
 		return
 	}
 	fmt.Fprintf(errOut, "A Codex app-server daemon (pid %d) is running and still uses the previous credentials.\n", state.PID)
@@ -79,17 +92,34 @@ func (a *app) restartDaemon(cmd *cobra.Command, s *store.Store) error {
 		return fmt.Errorf("cannot restart the daemon: %w", err)
 	}
 	// Codex prints a JSON restart result on stdout. The command reports
-	// success itself; keep Codex's stderr for failure diagnostics.
-	stdio := codex.Stdio{Out: io.Discard, Err: cmd.ErrOrStderr()}
-	if err := c.RestartDaemon(s.CodexHome, stdio); err != nil {
-		return fmt.Errorf("restarting the Codex app-server daemon failed; check whether it is still running with 'codexctl doctor': %w", err)
+	// success itself; keep Codex's stderr for failure diagnostics. Behind a
+	// spinner that output is collected and shown only if the restart fails.
+	restart := func(errOut io.Writer) error {
+		if err := c.RestartDaemon(s.CodexHome, codex.Stdio{Out: io.Discard, Err: errOut}); err != nil {
+			return fmt.Errorf("restarting the Codex app-server daemon failed; check whether it is still running with 'codexctl doctor': %w", err)
+		}
+		return nil
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), "Restarted the Codex app-server daemon; it now uses the active auth.json.")
+	if a.tui {
+		var diagnostics bytes.Buffer
+		err = tui.Spin(env(cmd), "Restarting the Codex app-server daemon", func() error { return restart(&diagnostics) })
+		if err != nil && diagnostics.Len() > 0 {
+			fmt.Fprint(cmd.ErrOrStderr(), diagnostics.String())
+		}
+	} else {
+		err = restart(cmd.ErrOrStderr())
+	}
+	if err != nil {
+		return err
+	}
+	a.success(cmd, "Restarted the Codex app-server daemon", "It now uses the active auth.json.",
+		"Restarted the Codex app-server daemon; it now uses the active auth.json.")
 	return nil
 }
 
 func (a *app) newRestartDaemonCommand() *cobra.Command {
-	return &cobra.Command{
+	var yes bool
+	cmd := &cobra.Command{
 		Use:   "restart-daemon",
 		Short: "Restart the Codex app-server daemon so it reloads the active credentials",
 		Long: "Restart the shared Codex app-server daemon so it reloads $CODEX_HOME/auth.json.\n" +
@@ -102,15 +132,39 @@ func (a *app) newRestartDaemonCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			state := s.Daemon()
+			var state store.DaemonState
+			detect := func() error {
+				state = s.Daemon()
+				return nil
+			}
+			if a.tui {
+				_ = tui.Spin(env(cmd), "Looking for the Codex app-server daemon", detect)
+			} else {
+				_ = detect()
+			}
 			switch state.State {
 			case daemon.NotRunning:
 				return fmt.Errorf("no Codex app-server daemon is running for %s; codexctl does not start one", s.CodexHome)
 			case daemon.Unknown:
 				return fmt.Errorf("refusing to restart: cannot tell whether a Codex app-server daemon is running: %s", state.Reason)
 			}
+			if a.tui && !yes {
+				restart, err := tui.Confirm(env(cmd), tui.ConfirmOptions{
+					Title:       fmt.Sprintf("Restart the Codex app-server daemon (pid %d)?", state.PID),
+					Description: []string{"This interrupts every active Codex session; a turn in progress may be lost."},
+					Affirmative: "Restart",
+					Negative:    "Cancel",
+					Danger:      true,
+				})
+				if err != nil || !restart {
+					return tui.ErrCancelled
+				}
+				return a.restartDaemon(cmd, s)
+			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "Restarting the Codex app-server daemon (pid %d); this interrupts active Codex sessions.\n", state.PID)
 			return a.restartDaemon(cmd, s)
 		},
 	}
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask for confirmation on a terminal")
+	return cmd
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"runtime/debug"
 	"strings"
 	"text/tabwriter"
@@ -50,6 +49,12 @@ type app struct {
 	// interactive is whether stdin is a terminal, so commands may ask
 	// before restarting the daemon.
 	interactive bool
+	// tui is whether prompts may use the full terminal UI: stdin and
+	// stderr are terminals and the UI has not been turned off.
+	tui bool
+	// styledOut and styledErr are whether stdout and stderr get colors
+	// and layout rather than the plain text scripts rely on.
+	styledOut, styledErr bool
 }
 
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -64,9 +69,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		},
 		executable: findExecutable,
 	}
-	if f, ok := stdin.(*os.File); ok {
-		a.interactive = isTerminal(f)
-	}
+	a.detectTerminals(stdin, stdout, stderr)
 	root := a.newRootCommand(stdin, stdout, stderr)
 	root.SetArgs(args)
 	return root.Execute()

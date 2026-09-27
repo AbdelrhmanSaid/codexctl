@@ -6,6 +6,7 @@ package tui
 import (
 	"errors"
 	"io"
+	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -61,9 +62,18 @@ type Theme struct {
 	Danger   lipgloss.Style
 }
 
+var (
+	darkOnce sync.Once
+	dark     bool
+)
+
 // NewTheme returns styles for output written to w.
 func NewTheme(w io.Writer) *Theme {
 	r := lipgloss.NewRenderer(w)
+	// Asking the terminal for its background color takes a round trip and
+	// can swallow keys typed meanwhile, so ask once per process.
+	darkOnce.Do(func() { dark = lipgloss.HasDarkBackground() })
+	r.SetHasDarkBackground(dark)
 	button := r.NewStyle().Padding(0, 2).Foreground(muted)
 	return &Theme{
 		r:        r,
