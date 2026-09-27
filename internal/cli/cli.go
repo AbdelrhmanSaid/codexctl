@@ -56,6 +56,11 @@ type app struct {
 	// styledOut and styledErr are whether stdout and stderr get colors
 	// and layout rather than the plain text scripts rely on.
 	styledOut, styledErr bool
+	// dashboard is whether the dashboard is open. It draws over what an
+	// action printed, so results holds what the action reported for the
+	// dashboard to show.
+	dashboard bool
+	results   []tui.Note
 }
 
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -522,6 +527,18 @@ func (a *app) newDoctorCommand() *cobra.Command {
 					failed = true
 				}
 				results = append(results, result{check.Message, !check.Warning})
+			}
+			// Problems come first, in case the dashboard has no room for
+			// every check.
+			for _, r := range results {
+				if !r.OK {
+					a.record(tui.LevelWarn, capitalize(r.Message))
+				}
+			}
+			for _, r := range results {
+				if r.OK {
+					a.record(tui.LevelOK, capitalize(r.Message))
+				}
 			}
 			out := cmd.OutOrStdout()
 			switch {

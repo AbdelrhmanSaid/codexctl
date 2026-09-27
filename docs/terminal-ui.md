@@ -7,6 +7,7 @@ Run `codexctl` with no arguments on a terminal.
 | Key | Action |
 | --- | --- |
 | `↑` `↓` | Move |
+| `Home` `End` | Jump to the first or last profile |
 | `Enter` | Switch to the profile |
 | `r` | Rename |
 | `d` | Remove |

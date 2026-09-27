@@ -63,12 +63,23 @@ func errTheme(cmd *cobra.Command) *tui.Theme { return tui.NewTheme(cmd.ErrOrStde
 func (a *app) success(cmd *cobra.Command, styled, hint, plain string) {
 	if !a.styledOut {
 		fmt.Fprintln(cmd.OutOrStdout(), plain)
+		a.record(tui.LevelOK, plain)
 		return
 	}
 	t := outTheme(cmd)
 	fmt.Fprint(cmd.OutOrStdout(), t.Success(styled))
+	a.record(tui.LevelOK, styled)
 	if hint != "" {
 		fmt.Fprint(cmd.OutOrStdout(), t.Hint(hint))
+		a.record(tui.LevelInfo, hint)
+	}
+}
+
+// record keeps a line of what an action reported for the dashboard, which
+// shows it once the action is over. Without the dashboard it does nothing.
+func (a *app) record(level tui.Level, text string) {
+	if a.dashboard {
+		a.results = append(a.results, tui.Note{Text: text, Level: level})
 	}
 }
 
@@ -77,6 +88,7 @@ func (a *app) warn(cmd *cobra.Command, warning string) {
 	if warning == "" {
 		return
 	}
+	a.record(tui.LevelWarn, capitalize(warning))
 	if a.styledErr {
 		fmt.Fprint(cmd.ErrOrStderr(), errTheme(cmd).Warning(capitalize(warning)))
 		return

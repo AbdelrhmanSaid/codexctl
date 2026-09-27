@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func plainTheme() *Theme { return NewTheme(&bytes.Buffer{}) }
@@ -300,5 +301,105 @@ func TestCancelledStepThatFinishesCountsAsDone(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("err = %v, want nil for a step that completed", err)
+	}
+}
+
+func TestDashboardFillsTheTerminal(t *testing.T) {
+	opts := DashboardOptions{
+		Title:    "codexctl",
+		Subtitle: "1.0.0",
+		Notes:    []Note{{Text: "The Codex daemon (pid 42) still uses the previous credentials; press R to restart it.", Level: LevelWarn}},
+		Rows: []DashboardRow{
+			{Name: "home", Detail: "someone@example.com · Plus", Extra: "Account 123", Active: true},
+			{Name: "work", Detail: "someone.else@example.com · Team"},
+		},
+		Results: []Note{{Text: "Now using profile home", Level: LevelOK}, {Text: "Restart running Codex clients to pick it up."}},
+		Actions: []Action{
+			{Key: "u", Label: "use", NeedsRow: true},
+			{Key: "r", Label: "rename", NeedsRow: true},
+			{Key: "n", Label: "log in"},
+			{Key: "R", Label: "restart daemon"},
+			{Key: "D", Label: "doctor"},
+		},
+	}
+	for _, size := range [][2]int{{100, 30}, {40, 20}, {32, 22}} {
+		m := &dashboardModel{opts: opts, theme: plainTheme()}
+		m.resize(size[0], size[1])
+		view := m.View()
+		lines := strings.Split(view, "\n")
+		if len(lines) != size[1] {
+			t.Fatalf("%dx%d: view has %d lines:\n%s", size[0], size[1], len(lines), view)
+		}
+		for _, line := range lines {
+			if w := lipgloss.Width(line); w > size[0] {
+				t.Fatalf("%dx%d: line %q is %d wide", size[0], size[1], line, w)
+			}
+		}
+		for _, want := range []string{"restart daemon", "quit", "Now using profile home"} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("%dx%d: view does not contain %q:\n%s", size[0], size[1], want, view)
+			}
+		}
+		// Results take up room that was blank, so the rest stays put.
+		bare := &dashboardModel{opts: opts, theme: plainTheme()}
+		bare.opts.Results = nil
+		bare.resize(size[0], size[1])
+		without := strings.Split(bare.View(), "\n")
+		if lines[0] != without[0] || lines[len(lines)-1] != without[len(without)-1] || len(lines) != len(without) {
+			t.Fatalf("%dx%d: results moved the dashboard:\n%s", size[0], size[1], view)
+		}
+	}
+}
+
+func TestDashboardScrollsAndClips(t *testing.T) {
+	opts := DashboardOptions{Title: "codexctl", Actions: []Action{{Key: "u", Label: "use", NeedsRow: true}}}
+	for _, name := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
+		opts.Rows = append(opts.Rows, DashboardRow{Name: "profile-" + name})
+	}
+	for i := 0; i < 10; i++ {
+		opts.Results = append(opts.Results, Note{Text: "check", Level: LevelOK})
+	}
+	m := &dashboardModel{opts: opts, theme: plainTheme()}
+	m.resize(60, 16)
+	m = keys(m, "end").(*dashboardModel)
+	view := m.View()
+	if got := len(strings.Split(view, "\n")); got != 16 {
+		t.Fatalf("view has %d lines, want 16:\n%s", got, view)
+	}
+	for _, want := range []string{"›   profile-h", "↑ 5 more", "more lines", "enter use"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("view does not contain %q:\n%s", want, view)
+		}
+	}
+
+	// A chosen action keeps the profiles and frees the rest for its prompts.
+	m = keys(m, "enter").(*dashboardModel)
+	view = m.View()
+	if !strings.Contains(view, "profile-h") || strings.Contains(view, "check") || strings.Contains(view, "quit") {
+		t.Fatalf("view after choosing an action:\n%s", view)
+	}
+}
+
+func TestHelpWraps(t *testing.T) {
+	th := plainTheme()
+	hints := []string{"↑/↓", "move", "enter", "select", "type", "filter", "esc", "cancel"}
+	if lines := th.help(0, hints...); len(lines) != 1 {
+		t.Fatalf("help without a width = %q", lines)
+	}
+	lines := th.help(24, hints...)
+	if len(lines) < 2 {
+		t.Fatalf("help did not wrap: %q", lines)
+	}
+	for _, line := range lines {
+		if lipgloss.Width(line) > 24 {
+			t.Fatalf("line %q is wider than 24", line)
+		}
+	}
+	m := newList(th, "Pick", items("alpha"), false)
+	m.resize(24, 10)
+	for _, line := range strings.Split(m.View(), "\n") {
+		if lipgloss.Width(line) > 24 {
+			t.Fatalf("list line %q is wider than 24", line)
+		}
 	}
 }

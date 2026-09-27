@@ -20,6 +20,7 @@ type ConfirmOptions struct {
 type confirmModel struct {
 	opts      ConfirmOptions
 	theme     *Theme
+	width     int
 	yes       bool
 	done      bool
 	cancelled bool
@@ -37,7 +38,12 @@ func newConfirm(t *Theme, opts ConfirmOptions) *confirmModel {
 
 func (m *confirmModel) Init() tea.Cmd { return nil }
 
+func (m *confirmModel) resize(width, _ int) { m.width = width }
+
 func (m *confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.resize(size.Width, size.Height)
+	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
@@ -74,8 +80,10 @@ func (m *confirmModel) View() string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", t.question(m.opts.Title))
-	for _, line := range m.opts.Description {
-		fmt.Fprintf(&b, "  %s\n", t.Muted.Render(line))
+	for _, text := range m.opts.Description {
+		for _, line := range wrap(text, m.width-2) {
+			fmt.Fprintf(&b, "  %s\n", t.Muted.Render(line))
+		}
 	}
 	yes, no := t.Button, t.ButtonOn
 	if m.yes {
@@ -85,7 +93,9 @@ func (m *confirmModel) View() string {
 		}
 	}
 	fmt.Fprintf(&b, "\n  %s %s\n\n", yes.Render(m.opts.Affirmative), no.Render(m.opts.Negative))
-	fmt.Fprintf(&b, "  %s\n", t.help("←/→", "switch", "y/n", "choose", "enter", "confirm", "esc", "cancel"))
+	for _, line := range t.help(m.width-2, "←/→", "switch", "y/n", "choose", "enter", "confirm", "esc", "cancel") {
+		fmt.Fprintf(&b, "  %s\n", line)
+	}
 	return b.String()
 }
 
@@ -101,8 +111,17 @@ func Confirm(env Env, opts ConfirmOptions) (bool, error) {
 	return m.yes, nil
 }
 
+// resizer is a model that lays itself out for the size of the terminal.
+type resizer interface {
+	resize(width, height int)
+}
+
 // run starts an inline program, never in the alternate screen, so every
-// finished prompt leaves a one-line record in the scrollback.
+// finished prompt leaves a one-line record in the scrollback. The model is
+// told the terminal's size up front, so its first frame already fits.
 func run(env Env, m tea.Model) (tea.Model, error) {
+	if r, ok := m.(resizer); ok {
+		r.resize(size(env.Out))
+	}
 	return tea.NewProgram(m, tea.WithInput(env.In), tea.WithOutput(env.Out)).Run()
 }

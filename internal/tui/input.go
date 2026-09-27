@@ -23,6 +23,7 @@ type inputModel struct {
 	opts      InputOptions
 	theme     *Theme
 	input     textinput.Model
+	width     int
 	problem   string
 	done      bool
 	cancelled bool
@@ -46,7 +47,13 @@ func newInput(t *Theme, opts InputOptions) *inputModel {
 
 func (m *inputModel) Init() tea.Cmd { return textinput.Blink }
 
+func (m *inputModel) resize(width, _ int) { m.width = width }
+
 func (m *inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.resize(size.Width, size.Height)
+		return m, nil
+	}
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "ctrl+c", "esc":
@@ -100,14 +107,21 @@ func (m *inputModel) View() string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", t.question(m.opts.Title))
-	for _, line := range m.opts.Description {
-		fmt.Fprintf(&b, "  %s\n", t.Muted.Render(line))
+	for _, text := range m.opts.Description {
+		for _, line := range wrap(text, m.width-2) {
+			fmt.Fprintf(&b, "  %s\n", t.Muted.Render(line))
+		}
 	}
 	fmt.Fprintf(&b, "  %s\n", m.input.View())
 	if m.problem != "" {
-		fmt.Fprintf(&b, "  %s\n", t.Warn.Render(glyphWarn+" "+m.problem))
+		for _, line := range t.note(Note{Text: m.problem, Level: LevelWarn}, m.width-2, false) {
+			fmt.Fprintf(&b, "  %s\n", line)
+		}
 	}
-	fmt.Fprintf(&b, "\n  %s\n", t.help("enter", "confirm", "esc", "cancel"))
+	b.WriteString("\n")
+	for _, line := range t.help(m.width-2, "enter", "confirm", "esc", "cancel") {
+		fmt.Fprintf(&b, "  %s\n", line)
+	}
 	return b.String()
 }
 

@@ -45,6 +45,7 @@ type listModel struct {
 	visible   []int // indexes into items that match the filter
 	cursor    int   // index into visible
 	offset    int   // first visible row drawn
+	width     int
 	problem   string
 	done      bool
 	cancelled bool
@@ -101,7 +102,12 @@ func (m *listModel) chosen() []int {
 
 func (m *listModel) Init() tea.Cmd { return nil }
 
+func (m *listModel) resize(width, _ int) { m.width = width }
+
 func (m *listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.resize(size.Width, size.Height)
+	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
@@ -248,12 +254,16 @@ func (m *listModel) View() string {
 	}
 	b.WriteString("\n")
 	if m.problem != "" {
-		fmt.Fprintf(&b, "  %s\n", t.Warn.Render(glyphWarn+" "+m.problem))
+		for _, line := range t.note(Note{Text: m.problem, Level: LevelWarn}, m.width-2, false) {
+			fmt.Fprintf(&b, "  %s\n", line)
+		}
 	}
+	hints := []string{"↑/↓", "move", "enter", "select", "type", "filter", "esc", "cancel"}
 	if m.multi {
-		fmt.Fprintf(&b, "  %s\n", t.help("↑/↓", "move", "space", "toggle", "ctrl+a", "all", "enter", "confirm", "esc", "cancel"))
-	} else {
-		fmt.Fprintf(&b, "  %s\n", t.help("↑/↓", "move", "enter", "select", "type", "filter", "esc", "cancel"))
+		hints = []string{"↑/↓", "move", "space", "toggle", "ctrl+a", "all", "enter", "confirm", "esc", "cancel"}
+	}
+	for _, line := range t.help(m.width-2, hints...) {
+		fmt.Fprintf(&b, "  %s\n", line)
 	}
 	return b.String()
 }
@@ -296,7 +306,7 @@ func (m *listModel) row(i int, focused bool, width int) string {
 	if item.Badge != "" {
 		line += "  " + t.Badge.Render(item.Badge)
 	}
-	return strings.TrimRight(line, " ")
+	return fit(strings.TrimRight(line, " "), m.width)
 }
 
 // Select asks the user to pick one item and returns its index.

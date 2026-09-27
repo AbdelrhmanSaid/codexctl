@@ -12,11 +12,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// runDashboard shows the profile dashboard until the user quits. Each
-// action runs the matching subcommand, with its own prompts and output,
-// and then the dashboard is drawn again with fresh state.
+// runDashboard shows the profile dashboard until the user quits. It holds
+// the alternate screen throughout. Each action runs the matching subcommand,
+// whose prompts appear under the profiles, and then the dashboard is drawn
+// again with fresh state and what the action reported.
 func (a *app) runDashboard(cmd *cobra.Command) error {
-	cursor := 0
+	screen := tui.OpenScreen(env(cmd))
+	defer screen.Close()
+	a.dashboard = true
+	defer func() { a.dashboard = false }()
+
+	cursor, focused := 0, ""
 	for {
 		s, err := a.openStore()
 		if err != nil {
@@ -27,20 +33,30 @@ func (a *app) runDashboard(cmd *cobra.Command) error {
 			return err
 		}
 		opts := dashboardOptions(s, profiles)
+		opts.Results = a.results
+		// Follow the focused profile if the list changed around it.
 		opts.Cursor = cursor
-		choice, err := tui.Dashboard(env(cmd), opts)
+		for i, p := range profiles {
+			if p.Name == focused {
+				opts.Cursor = i
+			}
+		}
+		choice, err := screen.Dashboard(opts)
 		if err != nil || choice.Key == "" {
 			return err
 		}
-		cursor = choice.Row
+		cursor, focused = choice.Row, ""
+		if cursor < len(profiles) {
+			focused = profiles[cursor].Name
+		}
+		a.results = nil
 		args, err := a.dashboardArgs(cmd, choice, profiles)
 		if err == nil {
 			err = a.runSubcommand(cmd, args)
 		}
 		if err != nil && !errors.Is(err, tui.ErrCancelled) && !errors.Is(err, ErrReported) {
-			PrintError(cmd.ErrOrStderr(), err)
+			a.record(tui.LevelFail, capitalize(err.Error()))
 		}
-		fmt.Fprintln(cmd.ErrOrStderr())
 	}
 }
 
@@ -95,18 +111,18 @@ func dashboardOptions(s *store.Store, profiles []store.Profile) tui.DashboardOpt
 	current, matches, err := s.Current()
 	switch {
 	case err != nil:
-		opts.Notes = append(opts.Notes, tui.Note{Text: "cannot read the selected profile: " + err.Error(), Warn: true})
+		opts.Notes = append(opts.Notes, tui.Note{Text: "Cannot read the selected profile: " + err.Error(), Level: tui.LevelWarn})
 	case current == "":
 		opts.Notes = append(opts.Notes, tui.Note{Text: "No profile is selected."})
 	case !matches:
-		opts.Notes = append(opts.Notes, tui.Note{Text: "The active auth.json no longer matches profile " + current + ".", Warn: true})
+		opts.Notes = append(opts.Notes, tui.Note{Text: "The active auth.json no longer matches profile " + current + ".", Level: tui.LevelWarn})
 	}
 
 	state := s.Daemon()
 	restart := false
 	switch {
 	case state.Stale:
-		opts.Notes = append(opts.Notes, tui.Note{Text: fmt.Sprintf("The Codex daemon (pid %d) still uses the previous credentials; press R to restart it.", state.PID), Warn: true})
+		opts.Notes = append(opts.Notes, tui.Note{Text: fmt.Sprintf("The Codex daemon (pid %d) still uses the previous credentials; press R to restart it.", state.PID), Level: tui.LevelWarn})
 		restart = true
 	case state.State == daemon.Running:
 		opts.Notes = append(opts.Notes, tui.Note{Text: fmt.Sprintf("Codex daemon running (pid %d).", state.PID)})

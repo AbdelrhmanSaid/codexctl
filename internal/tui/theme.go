@@ -6,10 +6,13 @@ package tui
 import (
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"sync"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/term"
 )
 
 // ErrCancelled is returned when the user leaves a prompt with Esc or Ctrl-C.
@@ -109,13 +112,100 @@ type Env struct {
 
 func (e Env) theme() *Theme { return NewTheme(e.Out) }
 
-// help renders a key hint line such as "enter confirm · esc cancel".
-func (t *Theme) help(pairs ...string) string {
-	hints := make([]string, 0, len(pairs)/2)
-	for i := 0; i+1 < len(pairs); i += 2 {
-		hints = append(hints, t.Key.Render(pairs[i])+" "+t.Muted.Render(pairs[i+1]))
+// size returns the width and height of the terminal behind w, or zeros when
+// w is not a terminal.
+func size(w io.Writer) (width, height int) {
+	f, ok := w.(*os.File)
+	if !ok {
+		return 0, 0
 	}
-	return strings.Join(hints, t.Muted.Render(glyphSeparator))
+	width, height, err := term.GetSize(f.Fd())
+	if err != nil {
+		return 0, 0
+	}
+	return width, height
+}
+
+// wrap breaks text into lines of at most width columns. A width of zero or
+// less means the width is not known and leaves the text as it is.
+func wrap(text string, width int) []string {
+	if width > 0 {
+		text = ansi.Wrap(text, width, "")
+	}
+	return strings.Split(text, "\n")
+}
+
+// fit shortens a line that is wider than width columns and ends it with an
+// ellipsis. A width of zero or less leaves the line as it is.
+func fit(line string, width int) string {
+	if width <= 0 {
+		return line
+	}
+	return ansi.Truncate(line, width, "…")
+}
+
+// indent starts every line with prefix.
+func indent(prefix string, lines []string) []string {
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i] = prefix + line
+	}
+	return out
+}
+
+// help renders key hints such as "enter confirm · esc cancel". Hints that do
+// not fit in width columns move to the next line; a width of zero or less
+// keeps them on one.
+func (t *Theme) help(width int, pairs ...string) []string {
+	separator := t.Muted.Render(glyphSeparator)
+	var lines []string
+	line, used := "", 0
+	for i := 0; i+1 < len(pairs); i += 2 {
+		hint := t.Key.Render(pairs[i]) + " " + t.Muted.Render(pairs[i+1])
+		w := lipgloss.Width(hint)
+		switch {
+		case line == "":
+			line, used = hint, w
+		case width > 0 && used+lipgloss.Width(glyphSeparator)+w > width:
+			lines = append(lines, line)
+			line, used = hint, w
+		default:
+			line += separator + hint
+			used += lipgloss.Width(glyphSeparator) + w
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// note renders a note as lines of at most width columns: a glyph for its
+// level, then the text, with wrapped lines lined up under it. A plain note
+// has no glyph and starts at the edge unless gutter is set.
+func (t *Theme) note(n Note, width int, gutter bool) []string {
+	style, glyph := t.Muted, ""
+	switch n.Level {
+	case LevelOK:
+		style, glyph = t.Text, t.OK.Render(glyphOK)
+	case LevelWarn:
+		style, glyph = t.Warn, t.Warn.Render(glyphWarn)
+	case LevelFail:
+		style, glyph = t.Text, t.Err.Render(glyphFail)
+	}
+	margin := ""
+	if glyph != "" || gutter {
+		margin = "  "
+	}
+	lines := wrap(n.Text, width-len(margin))
+	for i, line := range lines {
+		lead := margin
+		if i == 0 && glyph != "" {
+			lead = glyph + " "
+		}
+		lines[i] = lead + style.Render(line)
+	}
+	return lines
 }
 
 // question renders the "? Title" line every prompt starts with.

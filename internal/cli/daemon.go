@@ -32,7 +32,7 @@ func (a *app) offerDaemonRestart(cmd *cobra.Command, s *store.Store) {
 	case daemon.NotRunning:
 		return
 	case daemon.Unknown:
-		printWarning(cmd, "cannot tell whether a Codex app-server daemon is running: "+state.Reason+"; if one is, run 'codexctl restart-daemon' so it reloads the new credentials")
+		a.warn(cmd, "cannot tell whether a Codex app-server daemon is running: "+state.Reason+"; if one is, run 'codexctl restart-daemon' so it reloads the new credentials")
 		return
 	}
 	if a.tui {
@@ -107,6 +107,7 @@ func (a *app) restartDaemon(cmd *cobra.Command, s *store.Store) error {
 		err = tui.Spin(env(cmd), "Restarting the Codex app-server daemon", func() error { return restart(&diagnostics) })
 		if err != nil && !errors.Is(err, tui.ErrCancelled) && diagnostics.Len() > 0 {
 			fmt.Fprint(cmd.ErrOrStderr(), diagnostics.String())
+			a.record(tui.LevelInfo, strings.TrimSpace(diagnostics.String()))
 		}
 	} else {
 		err = restart(cmd.ErrOrStderr())
