@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"runtime/debug"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/AbdelrhmanSaid/codexctl/internal/codex"
 	"github.com/AbdelrhmanSaid/codexctl/internal/store"
+	"github.com/AbdelrhmanSaid/codexctl/internal/tui"
 	"github.com/AbdelrhmanSaid/codexctl/internal/update"
 
 	"github.com/spf13/cobra"
@@ -50,6 +50,12 @@ type app struct {
 	// interactive is whether stdin is a terminal, so commands may ask
 	// before restarting the daemon.
 	interactive bool
+	// tui is whether prompts may use the full terminal UI: stdin and
+	// stderr are terminals and the UI has not been turned off.
+	tui bool
+	// styledOut and styledErr are whether stdout and stderr get colors
+	// and layout rather than the plain text scripts rely on.
+	styledOut, styledErr bool
 }
 
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -64,9 +70,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		},
 		executable: findExecutable,
 	}
-	if f, ok := stdin.(*os.File); ok {
-		a.interactive = isTerminal(f)
-	}
+	a.detectTerminals(stdin, stdout, stderr)
 	root := a.newRootCommand(stdin, stdout, stderr)
 	root.SetArgs(args)
 	return root.Execute()
@@ -79,6 +83,14 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 		Version:       buildVersion(),
 		SilenceErrors: true,
 		SilenceUsage:  true,
+	}
+	// Without a subcommand, a terminal gets the dashboard and anything
+	// else gets the help text.
+	root.RunE = func(cmd *cobra.Command, _ []string) error {
+		if !a.tui {
+			return cmd.Help()
+		}
+		return a.runDashboard(cmd)
 	}
 	root.SetIn(stdin)
 	root.SetOut(stdout)
@@ -97,7 +109,7 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 		a.newLogoutCommand(),
 		a.newDoctorCommand(),
 		a.newRestartDaemonCommand(),
-		newUpdateCommand(),
+		a.newUpdateCommand(),
 		a.newUninstallCommand(),
 		newCompletionCommand(root),
 	)
@@ -107,9 +119,9 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 func (a *app) newLoginCommand() *cobra.Command {
 	var opts codex.LoginOptions
 	cmd := &cobra.Command{
-		Use:               "login PROFILE_NAME",
+		Use:               "login [PROFILE_NAME]",
 		Short:             "Log in and save a named profile",
-		Args:              cobra.ExactArgs(1),
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Look for codex first so a missing install fails before any
@@ -122,15 +134,27 @@ func (a *app) newLoginCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			stdio := codex.Stdio{In: cmd.InOrStdin(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}
-			warning, err := s.Login(args[0], func(home string) error {
-				return c.Login(home, opts, stdio)
-			})
+			name, err := a.newNameArg(cmd, s, args, 0, "PROFILE_NAME", tui.InputOptions{
+				Title:       "Name for this login",
+				Description: []string{"Letters, digits, '.', '_' and '-'. Reusing a name logs that profile in again."},
+				Placeholder: "work",
+			}, true)
 			if err != nil {
 				return err
 			}
-			printWarning(cmd, warning)
-			fmt.Fprintf(cmd.OutOrStdout(), "Saved and activated profile %q. Restart running Codex clients to pick it up.\n", args[0])
+			secret := ""
+			if a.tui && !opts.DeviceAuth && !opts.APIKey && !opts.AccessToken {
+				if opts, secret, err = a.chooseLoginMethod(cmd); err != nil {
+					return err
+				}
+			}
+			warning, err := a.runLogin(cmd, s, c, name, opts, secret)
+			if err != nil {
+				return err
+			}
+			a.warn(cmd, warning)
+			a.success(cmd, "Saved and activated profile "+a.name(cmd, name), "Restart running Codex clients to pick it up.",
+				fmt.Sprintf("Saved and activated profile %q. Restart running Codex clients to pick it up.", name))
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -144,20 +168,28 @@ func (a *app) newLoginCommand() *cobra.Command {
 
 func (a *app) newImportCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "import PROFILE_NAME",
+		Use:               "import [PROFILE_NAME]",
 		Short:             "Save the active auth.json as a profile",
 		Long:              "Save the credentials Codex is currently using as a named profile and select it.\nUse this for an account that was logged in with plain 'codex login'.",
-		Args:              cobra.ExactArgs(1),
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
-			if err := s.Import(args[0]); err != nil {
+			name, err := a.newNameArg(cmd, s, args, 0, "PROFILE_NAME", tui.InputOptions{
+				Title:       "Name for the current Codex login",
+				Placeholder: "personal",
+			}, false)
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Imported the active login as profile %q.\n", args[0])
+			if err := s.Import(name); err != nil {
+				return err
+			}
+			a.success(cmd, "Imported the active login as profile "+a.name(cmd, name), "",
+				fmt.Sprintf("Imported the active login as profile %q.", name))
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -166,21 +198,26 @@ func (a *app) newImportCommand() *cobra.Command {
 
 func (a *app) newUseCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "use PROFILE_NAME",
+		Use:               "use [PROFILE_NAME]",
 		Short:             "Activate a saved profile",
-		Args:              cobra.ExactArgs(1),
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: a.completeProfiles,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
-			warning, err := s.Use(args[0])
+			name, err := a.profileArg(cmd, s, args, "Switch to which profile?", false)
 			if err != nil {
 				return err
 			}
-			printWarning(cmd, warning)
-			fmt.Fprintf(cmd.OutOrStdout(), "Now using profile %q. Restart running Codex clients to pick it up.\n", args[0])
+			warning, err := s.Use(name)
+			if err != nil {
+				return err
+			}
+			a.warn(cmd, warning)
+			a.success(cmd, "Now using profile "+a.name(cmd, name), "Restart running Codex clients to pick it up.",
+				fmt.Sprintf("Now using profile %q. Restart running Codex clients to pick it up.", name))
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -206,6 +243,10 @@ func (a *app) newListCommand() *cobra.Command {
 			out := cmd.OutOrStdout()
 			if asJSON {
 				return writeJSON(out, profiles)
+			}
+			if a.styledOut {
+				printProfiles(cmd, profiles, verbose)
+				return nil
 			}
 			if !verbose {
 				for _, p := range profiles {
@@ -256,12 +297,16 @@ func (a *app) newCurrentCommand() *cobra.Command {
 					DaemonStale bool   `json:"daemon_stale"`
 				}{current, matches, daemonState.Stale})
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), current)
+			if a.styledOut {
+				printCurrent(cmd, s, current)
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), current)
+			}
 			if !matches {
-				printWarning(cmd, "the active auth.json no longer matches the selected profile")
+				a.warn(cmd, "the active auth.json no longer matches the selected profile")
 			}
 			if daemonState.Stale {
-				printWarning(cmd, fmt.Sprintf("the Codex app-server daemon (pid %d) started before this profile was selected and still uses the previous credentials; run 'codexctl restart-daemon' to reload it (this interrupts active Codex sessions)", daemonState.PID))
+				a.warn(cmd, fmt.Sprintf("the Codex app-server daemon (pid %d) started before this profile was selected and still uses the previous credentials; run 'codexctl restart-daemon' to reload it (this interrupts active Codex sessions)", daemonState.PID))
 			}
 			return nil
 		},
@@ -273,22 +318,30 @@ func (a *app) newCurrentCommand() *cobra.Command {
 func (a *app) newShowCommand() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:               "show PROFILE_NAME",
+		Use:               "show [PROFILE_NAME]",
 		Short:             "Show a profile's account details",
-		Args:              cobra.ExactArgs(1),
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: a.completeProfiles,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
-			p, err := s.Show(args[0])
+			name, err := a.profileArg(cmd, s, args, "Show which profile?", true)
+			if err != nil {
+				return err
+			}
+			p, err := s.Show(name)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
 			if asJSON {
 				return writeJSON(out, p)
+			}
+			if a.styledOut {
+				printProfileCard(cmd, p)
+				return nil
 			}
 			w := tabwriter.NewWriter(out, 0, 0, 1, ' ', 0)
 			fmt.Fprintf(w, "Name:\t%s\n", p.Name)
@@ -319,7 +372,8 @@ func (a *app) newSyncCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Saved the active credentials into profile %q.\n", name)
+			a.success(cmd, "Saved the active credentials into profile "+a.name(cmd, name), "",
+				fmt.Sprintf("Saved the active credentials into profile %q.", name))
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -328,21 +382,33 @@ func (a *app) newSyncCommand() *cobra.Command {
 
 func (a *app) newRenameCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "rename OLD_NAME NEW_NAME",
+		Use:               "rename [OLD_NAME [NEW_NAME]]",
 		Short:             "Rename a saved profile",
-		Args:              cobra.ExactArgs(2),
+		Args:              cobra.MaximumNArgs(2),
 		ValidArgsFunction: a.completeProfiles,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
-			warning, err := s.Rename(args[0], args[1])
+			oldName, err := a.profileArg(cmd, s, args, "Rename which profile?", true)
 			if err != nil {
 				return err
 			}
-			printWarning(cmd, warning)
-			fmt.Fprintf(cmd.OutOrStdout(), "Renamed profile %q to %q.\n", args[0], args[1])
+			newName, err := a.newNameArg(cmd, s, args, 1, "NEW_NAME", tui.InputOptions{
+				Title:       fmt.Sprintf("New name for %s", oldName),
+				Placeholder: oldName,
+			}, false)
+			if err != nil {
+				return err
+			}
+			warning, err := s.Rename(oldName, newName)
+			if err != nil {
+				return err
+			}
+			a.warn(cmd, warning)
+			a.success(cmd, fmt.Sprintf("Renamed profile %s to %s", a.name(cmd, oldName), a.name(cmd, newName)), "",
+				fmt.Sprintf("Renamed profile %q to %q.", oldName, newName))
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -351,22 +417,37 @@ func (a *app) newRenameCommand() *cobra.Command {
 
 func (a *app) newRemoveCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "remove PROFILE_NAME",
+		Use:               "remove [PROFILE_NAME...]",
 		Aliases:           []string{"rm"},
-		Short:             "Delete a saved profile",
-		Args:              cobra.ExactArgs(1),
+		Short:             "Delete saved profiles",
+		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: a.completeProfiles,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
-			warning, err := s.Remove(args[0])
+			names, err := a.profileArgs(cmd, s, args, "Remove which profiles?")
 			if err != nil {
 				return err
 			}
-			printWarning(cmd, warning)
-			fmt.Fprintf(cmd.OutOrStdout(), "Removed profile %q.\n", args[0])
+			// Names typed on the command line are deliberate; ones checked
+			// in a list get a second look.
+			if len(args) == 0 {
+				if err := confirmDanger(cmd, fmt.Sprintf("Remove %s?", countNoun(len(names), "profile")), "Remove",
+					strings.Join(names, ", "),
+					"Saved logins cannot be recovered. The active auth.json is left in place."); err != nil {
+					return err
+				}
+			}
+			for _, name := range names {
+				warning, err := s.Remove(name)
+				if err != nil {
+					return err
+				}
+				a.warn(cmd, warning)
+				a.success(cmd, "Removed profile "+a.name(cmd, name), "", fmt.Sprintf("Removed profile %q.", name))
+			}
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -375,10 +456,10 @@ func (a *app) newRemoveCommand() *cobra.Command {
 
 func (a *app) newLogoutCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "logout PROFILE_NAME",
+		Use:               "logout [PROFILE_NAME]",
 		Short:             "Log out of a profile's account and delete the profile",
 		Long:              "Run 'codex logout' for the profile's account in an isolated directory, then delete the profile.\nUnlike 'remove', this ends the session itself.",
-		Args:              cobra.ExactArgs(1),
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: a.completeProfiles,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := a.findCodex()
@@ -389,15 +470,23 @@ func (a *app) newLogoutCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			stdio := codex.Stdio{In: cmd.InOrStdin(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}
-			warning, err := s.Logout(args[0], func(home string) error {
-				return c.Logout(home, stdio)
-			})
+			name, err := a.profileArg(cmd, s, args, "Log out of which profile?", false)
 			if err != nil {
 				return err
 			}
-			printWarning(cmd, warning)
-			fmt.Fprintf(cmd.OutOrStdout(), "Logged out and removed profile %q.\n", args[0])
+			if len(args) == 0 {
+				if err := confirmDanger(cmd, fmt.Sprintf("Log out of %s?", name), "Log out",
+					"This ends the account's session and deletes the profile."); err != nil {
+					return err
+				}
+			}
+			warning, err := a.runLogout(cmd, s, c, name)
+			if err != nil {
+				return err
+			}
+			a.warn(cmd, warning)
+			a.success(cmd, "Logged out and removed profile "+a.name(cmd, name), "",
+				fmt.Sprintf("Logged out and removed profile %q.", name))
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -419,25 +508,43 @@ func (a *app) newDoctorCommand() *cobra.Command {
 				Message string `json:"message"`
 				OK      bool   `json:"ok"`
 			}
+			var checks []store.Check
+			if err := a.busy(cmd, "Checking configuration and profiles", func() error {
+				checks = s.Doctor()
+				return nil
+			}); err != nil {
+				return err
+			}
 			failed := false
 			results := []result{}
-			for _, check := range s.Doctor() {
+			for _, check := range checks {
 				if check.Warning {
 					failed = true
 				}
 				results = append(results, result{check.Message, !check.Warning})
 			}
-			if asJSON {
-				if err := writeJSON(cmd.OutOrStdout(), results); err != nil {
+			out := cmd.OutOrStdout()
+			switch {
+			case asJSON:
+				if err := writeJSON(out, results); err != nil {
 					return err
 				}
-			} else {
+			case a.styledOut:
+				items := make([]tui.Check, len(results))
+				for i, r := range results {
+					items[i] = tui.Check{Message: capitalize(r.Message), OK: r.OK}
+				}
+				fmt.Fprint(out, outTheme(cmd).Checklist(items))
+				if failed {
+					return ErrReported
+				}
+			default:
 				for _, r := range results {
 					status := "ok"
 					if !r.OK {
 						status = "warn"
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "%-4s %s\n", status, r.Message)
+					fmt.Fprintf(out, "%-4s %s\n", status, r.Message)
 				}
 			}
 			if failed {
@@ -447,96 +554,6 @@ func (a *app) newDoctorCommand() *cobra.Command {
 		},
 	}
 	addJSONFlag(cmd, &asJSON)
-	return cmd
-}
-
-func newUpdateCommand() *cobra.Command {
-	var check, force bool
-	var target string
-	cmd := &cobra.Command{
-		Use:   "update",
-		Short: "Update codexctl to the latest release",
-		Long: "Download the latest GitHub release, verify its Ed25519 signature and checksum, and replace this executable.\n" +
-			"Installs made with a package manager or 'go install' are told to update the same way they were installed.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			current := buildVersion()
-			releaseBuild := version != "dev"
-			exe, err := update.Executable()
-			if err != nil {
-				return fmt.Errorf("locate executable: %w", err)
-			}
-			client, err := update.NewClient(current)
-			if err != nil {
-				return err
-			}
-			ctx := cmd.Context()
-			var release *update.Release
-			if target == "" {
-				release, err = client.Latest(ctx)
-			} else {
-				release, err = client.Version(ctx, target)
-			}
-			if err != nil {
-				return err
-			}
-			out := cmd.OutOrStdout()
-			cmp := update.CompareVersions(release.Version, current)
-			if current == "dev" {
-				cmp = 1
-			}
-			if check {
-				switch {
-				case current == "dev":
-					fmt.Fprintf(out, "The latest release is codexctl %s. This is a development build, so it cannot be compared.\n", release.Version)
-				case cmp > 0:
-					fmt.Fprintf(out, "codexctl %s is available (installed %s). Run 'codexctl update' to install it.\n", release.Version, current)
-				case cmp < 0:
-					fmt.Fprintf(out, "codexctl %s is installed and is newer than release %s.\n", current, release.Version)
-				default:
-					fmt.Fprintf(out, "codexctl %s is up to date.\n", current)
-				}
-				return nil
-			}
-			if !force {
-				switch update.DetectInstall(releaseBuild, exe) {
-				case update.MethodGoInstall:
-					return fmt.Errorf("codexctl was installed with 'go install'; run 'go install github.com/%s@latest' instead, or pass --force to replace %s", update.Repo, exe)
-				case update.MethodPackage:
-					return fmt.Errorf("codexctl at %s was installed by a package manager; update it with that package manager, or pass --force to overwrite it", exe)
-				case update.MethodDev:
-					return fmt.Errorf("this is a development build; install a release from https://github.com/%s/releases, or pass --force to replace %s", update.Repo, exe)
-				}
-				if cmp == 0 {
-					fmt.Fprintf(out, "codexctl %s is already installed.\n", current)
-					return nil
-				}
-				if cmp < 0 {
-					if target == "" {
-						fmt.Fprintf(out, "codexctl %s is installed and is newer than release %s. Pass --to %s --force to downgrade.\n", current, release.Version, release.Version)
-						return nil
-					}
-					return fmt.Errorf("codexctl %s is newer than %s; pass --force to downgrade", current, release.Version)
-				}
-			}
-			archive, err := client.Download(ctx, release)
-			if err != nil {
-				return err
-			}
-			binary, err := update.ExtractBinary(archive, update.AssetName(release.Version))
-			if err != nil {
-				return err
-			}
-			if err := update.Apply(exe, binary); err != nil {
-				return err
-			}
-			fmt.Fprintf(out, "Updated codexctl from %s to %s at %s.\n", current, release.Version, exe)
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&check, "check", false, "report whether an update is available without installing it")
-	cmd.Flags().StringVar(&target, "to", "", "install this version instead of the latest release")
-	cmd.Flags().BoolVar(&force, "force", false, "replace the executable even for package, go install, or development builds, or to downgrade")
 	return cmd
 }
 

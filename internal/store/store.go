@@ -72,7 +72,7 @@ func (s *Store) Login(name string, runLogin func(home string) error) (string, er
 	}
 	loggedIn := filepath.Join(tempHome, "auth.json")
 	if _, err := readAuth(loggedIn); err != nil {
-		return "", fmt.Errorf("Codex did not produce a valid file-backed login: %w", err)
+		return "", fmt.Errorf("codex login did not produce a valid file-backed login: %w", err)
 	}
 	data, err := readFile(loggedIn)
 	if err != nil {
@@ -362,6 +362,9 @@ func (s *Store) Doctor() []Check {
 	checks = append(checks, s.daemonCheck())
 	return checks
 }
+
+// ValidateName reports whether name can be used as a profile name.
+func ValidateName(name string) error { return validateName(name) }
 
 func validateName(name string) error {
 	if !profileNamePattern.MatchString(name) {
