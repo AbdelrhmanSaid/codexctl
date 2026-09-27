@@ -101,7 +101,7 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 		a.newLogoutCommand(),
 		a.newDoctorCommand(),
 		a.newRestartDaemonCommand(),
-		newUpdateCommand(),
+		a.newUpdateCommand(),
 		a.newUninstallCommand(),
 		newCompletionCommand(root),
 	)
@@ -560,96 +560,6 @@ func (a *app) newDoctorCommand() *cobra.Command {
 		},
 	}
 	addJSONFlag(cmd, &asJSON)
-	return cmd
-}
-
-func newUpdateCommand() *cobra.Command {
-	var check, force bool
-	var target string
-	cmd := &cobra.Command{
-		Use:   "update",
-		Short: "Update codexctl to the latest release",
-		Long: "Download the latest GitHub release, verify its Ed25519 signature and checksum, and replace this executable.\n" +
-			"Installs made with a package manager or 'go install' are told to update the same way they were installed.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			current := buildVersion()
-			releaseBuild := version != "dev"
-			exe, err := update.Executable()
-			if err != nil {
-				return fmt.Errorf("locate executable: %w", err)
-			}
-			client, err := update.NewClient(current)
-			if err != nil {
-				return err
-			}
-			ctx := cmd.Context()
-			var release *update.Release
-			if target == "" {
-				release, err = client.Latest(ctx)
-			} else {
-				release, err = client.Version(ctx, target)
-			}
-			if err != nil {
-				return err
-			}
-			out := cmd.OutOrStdout()
-			cmp := update.CompareVersions(release.Version, current)
-			if current == "dev" {
-				cmp = 1
-			}
-			if check {
-				switch {
-				case current == "dev":
-					fmt.Fprintf(out, "The latest release is codexctl %s. This is a development build, so it cannot be compared.\n", release.Version)
-				case cmp > 0:
-					fmt.Fprintf(out, "codexctl %s is available (installed %s). Run 'codexctl update' to install it.\n", release.Version, current)
-				case cmp < 0:
-					fmt.Fprintf(out, "codexctl %s is installed and is newer than release %s.\n", current, release.Version)
-				default:
-					fmt.Fprintf(out, "codexctl %s is up to date.\n", current)
-				}
-				return nil
-			}
-			if !force {
-				switch update.DetectInstall(releaseBuild, exe) {
-				case update.MethodGoInstall:
-					return fmt.Errorf("codexctl was installed with 'go install'; run 'go install github.com/%s@latest' instead, or pass --force to replace %s", update.Repo, exe)
-				case update.MethodPackage:
-					return fmt.Errorf("codexctl at %s was installed by a package manager; update it with that package manager, or pass --force to overwrite it", exe)
-				case update.MethodDev:
-					return fmt.Errorf("this is a development build; install a release from https://github.com/%s/releases, or pass --force to replace %s", update.Repo, exe)
-				}
-				if cmp == 0 {
-					fmt.Fprintf(out, "codexctl %s is already installed.\n", current)
-					return nil
-				}
-				if cmp < 0 {
-					if target == "" {
-						fmt.Fprintf(out, "codexctl %s is installed and is newer than release %s. Pass --to %s --force to downgrade.\n", current, release.Version, release.Version)
-						return nil
-					}
-					return fmt.Errorf("codexctl %s is newer than %s; pass --force to downgrade", current, release.Version)
-				}
-			}
-			archive, err := client.Download(ctx, release)
-			if err != nil {
-				return err
-			}
-			binary, err := update.ExtractBinary(archive, update.AssetName(release.Version))
-			if err != nil {
-				return err
-			}
-			if err := update.Apply(exe, binary); err != nil {
-				return err
-			}
-			fmt.Fprintf(out, "Updated codexctl from %s to %s at %s.\n", current, release.Version, exe)
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&check, "check", false, "report whether an update is available without installing it")
-	cmd.Flags().StringVar(&target, "to", "", "install this version instead of the latest release")
-	cmd.Flags().BoolVar(&force, "force", false, "replace the executable even for package, go install, or development builds, or to downgrade")
 	return cmd
 }
 

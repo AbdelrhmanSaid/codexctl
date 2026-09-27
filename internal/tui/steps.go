@@ -17,7 +17,8 @@ type Step struct {
 }
 
 // Reporter lets a running step update its line. It is safe to call from the
-// step's goroutine.
+// step's goroutine. The zero Reporter discards everything, for running a
+// step without a terminal.
 type Reporter struct {
 	index int
 	send  func(tea.Msg)
@@ -26,12 +27,18 @@ type Reporter struct {
 // Progress reports how much of the step is done, from 0 to 1. The first call
 // turns the spinner line into a progress bar.
 func (r *Reporter) Progress(fraction float64) {
+	if r.send == nil {
+		return
+	}
 	r.send(progressMsg{r.index, max(0, min(fraction, 1))})
 }
 
 // Result replaces the step's title once it has finished, for example with
 // what it found.
 func (r *Reporter) Result(text string) {
+	if r.send == nil {
+		return
+	}
 	r.send(resultMsg{r.index, text})
 }
 

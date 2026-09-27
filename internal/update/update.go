@@ -45,6 +45,9 @@ type Client struct {
 	PublicKey ed25519.PublicKey
 	// ReleasesURL is the GitHub releases page; tests point it elsewhere.
 	ReleasesURL string
+	// Progress, when set, is told how many bytes of a download have
+	// arrived and the expected total, which is -1 when unknown.
+	Progress func(done, total int64)
 }
 
 func NewClient(currentVersion string) (*Client, error) {
@@ -126,7 +129,11 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download %s: unexpected status %s", path.Base(url), resp.Status)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownload+1))
+	var body io.Reader = resp.Body
+	if c.Progress != nil {
+		body = &progressReader{r: body, total: resp.ContentLength, report: c.Progress}
+	}
+	data, err := io.ReadAll(io.LimitReader(body, maxDownload+1))
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", path.Base(url), err)
 	}
@@ -134,6 +141,21 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("download %s: response is larger than %d bytes", path.Base(url), maxDownload)
 	}
 	return data, nil
+}
+
+// progressReader reports how much of a response body has been read.
+type progressReader struct {
+	r      io.Reader
+	done   int64
+	total  int64
+	report func(done, total int64)
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	p.done += int64(n)
+	p.report(p.done, p.total)
+	return n, err
 }
 
 // parseChecksums reads GoReleaser's checksums.txt. The version is taken from

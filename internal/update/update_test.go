@@ -217,9 +217,14 @@ func TestClientEndToEnd(t *testing.T) {
 	if release.Version != "2.0.0" {
 		t.Fatalf("version = %q", release.Version)
 	}
+	var done, total int64
+	c.Progress = func(d, t int64) { done, total = d, t }
 	data, err := c.Download(context.Background(), release)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if done != int64(len(archive)) || total != int64(len(archive)) {
+		t.Fatalf("progress reported %d of %d bytes, want %d", done, total, len(archive))
 	}
 	got, err := ExtractBinary(data, name)
 	if err != nil {
