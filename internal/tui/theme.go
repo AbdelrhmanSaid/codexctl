@@ -125,6 +125,9 @@ func (t *Theme) question(title string) string {
 
 // answered renders a finished prompt as one line that stays in scrollback.
 func (t *Theme) answered(title, answer string) string {
+	if !strings.HasSuffix(title, "?") {
+		title += ":"
+	}
 	return t.OK.Render(glyphOK) + " " + t.Title.Render(title) + " " + t.Accent.Render(answer) + "\n"
 }
 

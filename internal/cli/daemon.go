@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -103,7 +104,7 @@ func (a *app) restartDaemon(cmd *cobra.Command, s *store.Store) error {
 	if a.tui {
 		var diagnostics bytes.Buffer
 		err = tui.Spin(env(cmd), "Restarting the Codex app-server daemon", func() error { return restart(&diagnostics) })
-		if err != nil && diagnostics.Len() > 0 {
+		if err != nil && !errors.Is(err, tui.ErrCancelled) && diagnostics.Len() > 0 {
 			fmt.Fprint(cmd.ErrOrStderr(), diagnostics.String())
 		}
 	} else {

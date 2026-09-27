@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/AbdelrhmanSaid/codexctl/internal/tui"
 
@@ -60,7 +62,7 @@ func (a *app) warn(cmd *cobra.Command, warning string) {
 		return
 	}
 	if a.styledErr {
-		fmt.Fprint(cmd.ErrOrStderr(), errTheme(cmd).Warning(warning))
+		fmt.Fprint(cmd.ErrOrStderr(), errTheme(cmd).Warning(capitalize(warning)))
 		return
 	}
 	printWarning(cmd, warning)
@@ -80,4 +82,27 @@ func displayPath(path string) string {
 		return "~" + string(filepath.Separator) + rest
 	}
 	return path
+}
+
+// name renders a profile name for a stdout message.
+func (a *app) name(cmd *cobra.Command, name string) string {
+	if !a.styledOut {
+		return name
+	}
+	return outTheme(cmd).Name(name)
+}
+
+// countNoun renders "1 profile" or "3 profiles".
+func countNoun(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// capitalize upper-cases the first letter of a message that is shown on its
+// own rather than after a "warning:" prefix.
+func capitalize(message string) string {
+	r, size := utf8.DecodeRuneInString(message)
+	return string(unicode.ToUpper(r)) + message[size:]
 }

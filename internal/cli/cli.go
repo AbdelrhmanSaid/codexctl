@@ -11,6 +11,7 @@ import (
 
 	"github.com/AbdelrhmanSaid/codexctl/internal/codex"
 	"github.com/AbdelrhmanSaid/codexctl/internal/store"
+	"github.com/AbdelrhmanSaid/codexctl/internal/tui"
 	"github.com/AbdelrhmanSaid/codexctl/internal/update"
 
 	"github.com/spf13/cobra"
@@ -110,9 +111,9 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 func (a *app) newLoginCommand() *cobra.Command {
 	var opts codex.LoginOptions
 	cmd := &cobra.Command{
-		Use:               "login PROFILE_NAME",
+		Use:               "login [PROFILE_NAME]",
 		Short:             "Log in and save a named profile",
-		Args:              cobra.ExactArgs(1),
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Look for codex first so a missing install fails before any
@@ -125,15 +126,27 @@ func (a *app) newLoginCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			stdio := codex.Stdio{In: cmd.InOrStdin(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}
-			warning, err := s.Login(args[0], func(home string) error {
-				return c.Login(home, opts, stdio)
-			})
+			name, err := a.newNameArg(cmd, s, args, 0, tui.InputOptions{
+				Title:       "Name for this login",
+				Description: []string{"Letters, digits, '.', '_' and '-'. Reusing a name logs that profile in again."},
+				Placeholder: "work",
+			}, true)
 			if err != nil {
 				return err
 			}
-			printWarning(cmd, warning)
-			fmt.Fprintf(cmd.OutOrStdout(), "Saved and activated profile %q. Restart running Codex clients to pick it up.\n", args[0])
+			secret := ""
+			if a.tui && !opts.DeviceAuth && !opts.APIKey && !opts.AccessToken {
+				if opts, secret, err = a.chooseLoginMethod(cmd); err != nil {
+					return err
+				}
+			}
+			warning, err := a.runLogin(cmd, s, c, name, opts, secret)
+			if err != nil {
+				return err
+			}
+			a.warn(cmd, warning)
+			a.success(cmd, "Saved and activated profile "+a.name(cmd, name), "Restart running Codex clients to pick it up.",
+				fmt.Sprintf("Saved and activated profile %q. Restart running Codex clients to pick it up.", name))
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -147,20 +160,28 @@ func (a *app) newLoginCommand() *cobra.Command {
 
 func (a *app) newImportCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "import PROFILE_NAME",
+		Use:               "import [PROFILE_NAME]",
 		Short:             "Save the active auth.json as a profile",
 		Long:              "Save the credentials Codex is currently using as a named profile and select it.\nUse this for an account that was logged in with plain 'codex login'.",
-		Args:              cobra.ExactArgs(1),
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
-			if err := s.Import(args[0]); err != nil {
+			name, err := a.newNameArg(cmd, s, args, 0, tui.InputOptions{
+				Title:       "Name for the current Codex login",
+				Placeholder: "personal",
+			}, false)
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Imported the active login as profile %q.\n", args[0])
+			if err := s.Import(name); err != nil {
+				return err
+			}
+			a.success(cmd, "Imported the active login as profile "+a.name(cmd, name), "",
+				fmt.Sprintf("Imported the active login as profile %q.", name))
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -169,21 +190,26 @@ func (a *app) newImportCommand() *cobra.Command {
 
 func (a *app) newUseCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "use PROFILE_NAME",
+		Use:               "use [PROFILE_NAME]",
 		Short:             "Activate a saved profile",
-		Args:              cobra.ExactArgs(1),
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: a.completeProfiles,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
-			warning, err := s.Use(args[0])
+			name, err := a.profileArg(cmd, s, args, "Switch to which profile?", false)
 			if err != nil {
 				return err
 			}
-			printWarning(cmd, warning)
-			fmt.Fprintf(cmd.OutOrStdout(), "Now using profile %q. Restart running Codex clients to pick it up.\n", args[0])
+			warning, err := s.Use(name)
+			if err != nil {
+				return err
+			}
+			a.warn(cmd, warning)
+			a.success(cmd, "Now using profile "+a.name(cmd, name), "Restart running Codex clients to pick it up.",
+				fmt.Sprintf("Now using profile %q. Restart running Codex clients to pick it up.", name))
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -276,16 +302,20 @@ func (a *app) newCurrentCommand() *cobra.Command {
 func (a *app) newShowCommand() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:               "show PROFILE_NAME",
+		Use:               "show [PROFILE_NAME]",
 		Short:             "Show a profile's account details",
-		Args:              cobra.ExactArgs(1),
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: a.completeProfiles,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
-			p, err := s.Show(args[0])
+			name, err := a.profileArg(cmd, s, args, "Show which profile?", true)
+			if err != nil {
+				return err
+			}
+			p, err := s.Show(name)
 			if err != nil {
 				return err
 			}
@@ -331,21 +361,33 @@ func (a *app) newSyncCommand() *cobra.Command {
 
 func (a *app) newRenameCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "rename OLD_NAME NEW_NAME",
+		Use:               "rename [OLD_NAME [NEW_NAME]]",
 		Short:             "Rename a saved profile",
-		Args:              cobra.ExactArgs(2),
+		Args:              cobra.MaximumNArgs(2),
 		ValidArgsFunction: a.completeProfiles,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
-			warning, err := s.Rename(args[0], args[1])
+			oldName, err := a.profileArg(cmd, s, args, "Rename which profile?", true)
 			if err != nil {
 				return err
 			}
-			printWarning(cmd, warning)
-			fmt.Fprintf(cmd.OutOrStdout(), "Renamed profile %q to %q.\n", args[0], args[1])
+			newName, err := a.newNameArg(cmd, s, args, 1, tui.InputOptions{
+				Title:       fmt.Sprintf("New name for %s", oldName),
+				Placeholder: oldName,
+			}, false)
+			if err != nil {
+				return err
+			}
+			warning, err := s.Rename(oldName, newName)
+			if err != nil {
+				return err
+			}
+			a.warn(cmd, warning)
+			a.success(cmd, fmt.Sprintf("Renamed profile %s to %s", a.name(cmd, oldName), a.name(cmd, newName)), "",
+				fmt.Sprintf("Renamed profile %q to %q.", oldName, newName))
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -354,22 +396,45 @@ func (a *app) newRenameCommand() *cobra.Command {
 
 func (a *app) newRemoveCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "remove PROFILE_NAME",
+		Use:               "remove [PROFILE_NAME...]",
 		Aliases:           []string{"rm"},
-		Short:             "Delete a saved profile",
-		Args:              cobra.ExactArgs(1),
+		Short:             "Delete saved profiles",
+		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: a.completeProfiles,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.openStore()
 			if err != nil {
 				return err
 			}
-			warning, err := s.Remove(args[0])
+			names, err := a.profileArgs(cmd, s, args, "Remove which profiles?")
 			if err != nil {
 				return err
 			}
-			printWarning(cmd, warning)
-			fmt.Fprintf(cmd.OutOrStdout(), "Removed profile %q.\n", args[0])
+			// Names typed on the command line are deliberate; ones checked
+			// in a list get a second look.
+			if len(args) == 0 {
+				remove, err := tui.Confirm(env(cmd), tui.ConfirmOptions{
+					Title: fmt.Sprintf("Remove %s?", countNoun(len(names), "profile")),
+					Description: []string{
+						strings.Join(names, ", "),
+						"Saved logins cannot be recovered. The active auth.json is left in place.",
+					},
+					Affirmative: "Remove",
+					Negative:    "Cancel",
+					Danger:      true,
+				})
+				if err != nil || !remove {
+					return tui.ErrCancelled
+				}
+			}
+			for _, name := range names {
+				warning, err := s.Remove(name)
+				if err != nil {
+					return err
+				}
+				a.warn(cmd, warning)
+				a.success(cmd, "Removed profile "+a.name(cmd, name), "", fmt.Sprintf("Removed profile %q.", name))
+			}
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},
@@ -378,10 +443,10 @@ func (a *app) newRemoveCommand() *cobra.Command {
 
 func (a *app) newLogoutCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:               "logout PROFILE_NAME",
+		Use:               "logout [PROFILE_NAME]",
 		Short:             "Log out of a profile's account and delete the profile",
 		Long:              "Run 'codex logout' for the profile's account in an isolated directory, then delete the profile.\nUnlike 'remove', this ends the session itself.",
-		Args:              cobra.ExactArgs(1),
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: a.completeProfiles,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := a.findCodex()
@@ -392,15 +457,29 @@ func (a *app) newLogoutCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			stdio := codex.Stdio{In: cmd.InOrStdin(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}
-			warning, err := s.Logout(args[0], func(home string) error {
-				return c.Logout(home, stdio)
-			})
+			name, err := a.profileArg(cmd, s, args, "Log out of which profile?", false)
 			if err != nil {
 				return err
 			}
-			printWarning(cmd, warning)
-			fmt.Fprintf(cmd.OutOrStdout(), "Logged out and removed profile %q.\n", args[0])
+			if len(args) == 0 {
+				logout, err := tui.Confirm(env(cmd), tui.ConfirmOptions{
+					Title:       fmt.Sprintf("Log out of %s?", name),
+					Description: []string{"This ends the account's session and deletes the profile."},
+					Affirmative: "Log out",
+					Negative:    "Cancel",
+					Danger:      true,
+				})
+				if err != nil || !logout {
+					return tui.ErrCancelled
+				}
+			}
+			warning, err := a.runLogout(cmd, s, c, name)
+			if err != nil {
+				return err
+			}
+			a.warn(cmd, warning)
+			a.success(cmd, "Logged out and removed profile "+a.name(cmd, name), "",
+				fmt.Sprintf("Logged out and removed profile %q.", name))
 			a.offerDaemonRestart(cmd, s)
 			return nil
 		},

@@ -363,6 +363,9 @@ func (s *Store) Doctor() []Check {
 	return checks
 }
 
+// ValidateName reports whether name can be used as a profile name.
+func ValidateName(name string) error { return validateName(name) }
+
 func validateName(name string) error {
 	if !profileNamePattern.MatchString(name) {
 		return errors.New("profile names must be 1-64 characters using letters, digits, '.', '_' or '-', and must start with a letter or digit")
