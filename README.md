@@ -20,6 +20,34 @@ codexctl uninstall --purge      # remove codexctl and every saved profile
 
 `list`, `current`, `show`, and `doctor` accept `--json` for scripting.
 
+## Interactive terminal UI
+
+On a terminal, run `codexctl` on its own to open a dashboard of your
+profiles. Move with the arrow keys, press Enter to switch, and use single
+keys to rename (`r`), remove (`d`), log out (`l`), log in (`n`), import
+(`i`), restart the daemon (`R`), run `doctor` (`D`) or `update` (`U`).
+
+Every command also works without its arguments on a terminal:
+
+- `use`, `show`, `rename` and `logout` let you pick the profile from a list
+  you can filter by typing.
+- `remove` shows a checkbox list, so several profiles can go at once, and
+  asks before deleting them.
+- `login`, `import` and `rename` ask for the new name and check it as you
+  type. `login` also asks how to sign in; an API key or access token is
+  typed into a masked field rather than your shell history.
+- Yes/no questions, such as restarting the daemon or uninstalling, use
+  buttons, and anything that removes data is marked in red.
+- Slow work (`update`, `doctor`, `logout`, daemon restarts) runs behind a
+  spinner or a progress bar, and `list`, `show`, `current` and `doctor`
+  print styled tables, cards and checklists.
+
+Output that is piped or redirected, `--json`, and runs without a terminal
+keep the plain text and exact behavior scripts rely on. Set
+`CODEXCTL_NO_TUI=1` (or `TERM=dumb`) to turn the UI off everywhere;
+`NO_COLOR` turns off colors only. Cancelling a prompt with Esc or Ctrl-C
+exits with status 130.
+
 It keeps Codex's normal configuration, history, sessions, skills, and plugins in
 the same `CODEX_HOME`. Only the file-backed login cache is switched. This makes
 the selected account visible to the Codex CLI and other Codex clients that use
@@ -127,8 +155,9 @@ codexctl uninstall --purge                # also delete ~/.codexctl and every sa
 codexctl uninstall --purge --keep-binary  # delete only the saved profiles and state
 ```
 
-`uninstall` lists what it will remove and asks before doing it; pass `--yes`
-to skip the question, which is required when stdin is not a terminal. It
+`uninstall` lists what it will remove and asks before doing it; run without
+flags on a terminal, it lets you check what to remove. Pass `--yes` to skip
+the question, which is required when stdin is not a terminal. It
 never touches `CODEX_HOME`: the active `auth.json` and the
 `cli_auth_credentials_store = "file"` setting in `config.toml` stay in place,
 so Codex stays logged in with the currently selected account. Deleted
@@ -220,7 +249,7 @@ never printed.
 
 `codexctl rename OLD NEW` renames a saved profile. If it is the selected
 profile, any token refreshes are saved first and the selection follows the new
-name. `codexctl remove NAME` deletes a saved profile. Removing the selected
+name. `codexctl remove NAME...` deletes saved profiles. Removing the selected
 profile clears the selection but leaves `auth.json` in place, so Codex stays
 logged in until you `use` another profile.
 
@@ -259,7 +288,8 @@ codexctl handles this as follows:
   it now. The default answer is no. In scripts and pipes it never asks and
   never restarts; it prints a reminder instead.
 - `codexctl restart-daemon` restarts the daemon on demand. It runs
-  `codex app-server daemon restart` with the same `CODEX_HOME`.
+  `codex app-server daemon restart` with the same `CODEX_HOME`. On a
+  terminal it asks first; `--yes` skips the question.
 - A restart interrupts every Codex session that runs on the daemon. Codex
   tries to resume interrupted threads after a restart, but a turn that was in
   progress may be lost, so let running work finish first.

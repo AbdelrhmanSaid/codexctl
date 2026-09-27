@@ -20,10 +20,26 @@ import (
 // line-based prompts.
 func (a *app) detectTerminals(stdin io.Reader, stdout, stderr io.Writer) {
 	a.interactive = isTerminal(stdin)
-	allowed := os.Getenv("CODEXCTL_NO_TUI") == "" && os.Getenv("TERM") != "dumb"
+	allowed := styleAllowed()
 	a.styledOut = allowed && isTerminal(stdout)
 	a.styledErr = allowed && isTerminal(stderr)
 	a.tui = a.interactive && a.styledErr
+}
+
+// styleAllowed reports whether the environment permits colors and the
+// terminal UI at all.
+func styleAllowed() bool {
+	return os.Getenv("CODEXCTL_NO_TUI") == "" && os.Getenv("TERM") != "dumb"
+}
+
+// PrintError reports a command's error on w: a red line on a terminal, a
+// "codexctl:" prefixed line otherwise.
+func PrintError(w io.Writer, err error) {
+	if styleAllowed() && isTerminal(w) {
+		fmt.Fprint(w, tui.NewTheme(w).Failure(capitalize(err.Error())))
+		return
+	}
+	fmt.Fprintf(w, "codexctl: %v\n", err)
 }
 
 // isTerminal reports whether v is an interactive terminal, in which case a

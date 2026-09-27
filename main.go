@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"os"
 
 	"github.com/AbdelrhmanSaid/codexctl/internal/cli"
@@ -19,7 +18,7 @@ func main() {
 		if errors.Is(err, cli.ErrReported) {
 			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "codexctl: %v\n", err)
+		cli.PrintError(os.Stderr, err)
 		os.Exit(1)
 	}
 }
