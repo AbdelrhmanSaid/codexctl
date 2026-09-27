@@ -221,3 +221,41 @@ func TestSpinClearsItsLineOnSuccess(t *testing.T) {
 		t.Fatalf("spinner left a finished line:\n%q", final)
 	}
 }
+
+func TestDashboard(t *testing.T) {
+	opts := DashboardOptions{
+		Title: "codexctl",
+		Rows:  []DashboardRow{{Name: "home", Active: true}, {Name: "work"}},
+		Actions: []Action{
+			{Key: "u", Label: "use", NeedsRow: true},
+			{Key: "n", Label: "log in"},
+		},
+	}
+	choose := func(o DashboardOptions, presses ...string) *dashboardModel {
+		m := &dashboardModel{opts: o, theme: plainTheme()}
+		return keys(m, presses...).(*dashboardModel)
+	}
+	if m := choose(opts, "down", "enter"); m.choice != (DashboardChoice{Key: "u", Row: 1}) {
+		t.Fatalf("enter chose %+v, want use on row 1", m.choice)
+	}
+	if m := choose(opts, "n"); m.choice.Key != "n" {
+		t.Fatalf("n chose %+v", m.choice)
+	}
+	if m := choose(opts, "x"); m.done {
+		t.Fatal("an unknown key closed the dashboard")
+	}
+	if m := choose(opts, "q"); !m.done || m.choice.Key != "" || m.View() != "" {
+		t.Fatalf("q did not quit cleanly: %+v", m.choice)
+	}
+
+	empty := opts
+	empty.Rows = nil
+	m := choose(empty, "u")
+	if m.done {
+		t.Fatal("a profile action ran with no profiles")
+	}
+	view := m.View()
+	if strings.Contains(view, "use") || !strings.Contains(view, "No profiles yet") {
+		t.Fatalf("empty dashboard view:\n%s", view)
+	}
+}

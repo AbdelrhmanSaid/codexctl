@@ -84,6 +84,15 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
+	// Without a subcommand, a terminal gets the dashboard and anything
+	// else gets the help text.
+	root.Args = cobra.NoArgs
+	root.RunE = func(cmd *cobra.Command, _ []string) error {
+		if !a.tui {
+			return cmd.Help()
+		}
+		return a.runDashboard(cmd)
+	}
 	root.SetIn(stdin)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
