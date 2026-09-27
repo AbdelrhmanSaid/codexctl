@@ -48,49 +48,53 @@ func (a *app) chooseLoginMethod(cmd *cobra.Command) (codex.LoginOptions, string,
 
 // runLogin runs codex login for a profile. A browser or device login keeps
 // the terminal, since Codex prints a link or code to follow; a pasted
-// secret is fed to Codex behind a spinner.
-func (a *app) runLogin(cmd *cobra.Command, s *store.Store, c codexCLI, name string, opts codex.LoginOptions, secret string) (string, error) {
-	stdio := codex.Stdio{In: cmd.InOrStdin(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}
-	if !a.tui {
+// secret is fed to Codex out of sight.
+func (a *app) runLogin(cmd *cobra.Command, s *store.Store, c codexCLI, name string, opts codex.LoginOptions, secret string) (store.Result, error) {
+	login := func(stdio codex.Stdio) (store.Result, error) {
 		return s.Login(name, func(home string) error { return c.Login(home, opts, stdio) })
 	}
-	if secret == "" {
+	if a.tui && secret == "" {
 		fmt.Fprint(cmd.ErrOrStderr(), errTheme(cmd).Hint(fmt.Sprintf("Starting 'codex login' for profile %s…", name)))
-		return s.Login(name, func(home string) error { return c.Login(home, opts, stdio) })
+		return login(commandStdio(cmd))
 	}
-	var output bytes.Buffer
-	stdio = codex.Stdio{In: strings.NewReader(secret + "\n"), Out: &output, Err: &output}
-	var warning string
-	err := tui.Spin(env(cmd), fmt.Sprintf("Logging in profile %s", name), func() error {
+	var result store.Result
+	err := a.quietly(cmd, fmt.Sprintf("Logging in profile %s", name), secret+"\n", func(stdio codex.Stdio) error {
 		var err error
-		warning, err = s.Login(name, func(home string) error { return c.Login(home, opts, stdio) })
+		result, err = login(stdio)
 		return err
 	})
-	if err != nil {
-		return "", withOutput(err, &output)
-	}
-	return warning, nil
+	return result, err
 }
 
-// runLogout runs codex logout for a profile, behind a spinner on a
-// terminal.
-func (a *app) runLogout(cmd *cobra.Command, s *store.Store, c codexCLI, name string) (string, error) {
-	if !a.tui {
-		stdio := codex.Stdio{In: cmd.InOrStdin(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}
-		return s.Logout(name, func(home string) error { return c.Logout(home, stdio) })
-	}
-	var output bytes.Buffer
-	stdio := codex.Stdio{In: strings.NewReader(""), Out: &output, Err: &output}
-	var warning string
-	err := tui.Spin(env(cmd), fmt.Sprintf("Logging out of %s", name), func() error {
+// runLogout runs codex logout for a profile.
+func (a *app) runLogout(cmd *cobra.Command, s *store.Store, c codexCLI, name string) (store.Result, error) {
+	var result store.Result
+	err := a.quietly(cmd, fmt.Sprintf("Logging out of %s", name), "", func(stdio codex.Stdio) error {
 		var err error
-		warning, err = s.Logout(name, func(home string) error { return c.Logout(home, stdio) })
+		result, err = s.Logout(name, func(home string) error { return c.Logout(home, stdio) })
 		return err
 	})
-	if err != nil {
-		return "", withOutput(err, &output)
+	return result, err
+}
+
+// commandStdio attaches a Codex process to the command's own streams.
+func commandStdio(cmd *cobra.Command) codex.Stdio {
+	return codex.Stdio{In: cmd.InOrStdin(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr()}
+}
+
+// quietly runs a Codex process that needs no one at the keyboard. On a
+// terminal it runs behind a spinner, reading input and writing to a buffer;
+// if it fails, what it wrote is added to the error. Without the terminal UI
+// it is attached to the command's own streams.
+func (a *app) quietly(cmd *cobra.Command, title, input string, run func(stdio codex.Stdio) error) error {
+	if !a.tui {
+		return run(commandStdio(cmd))
 	}
-	return warning, nil
+	var output bytes.Buffer
+	err := tui.Spin(env(cmd), title, func() error {
+		return run(codex.Stdio{In: strings.NewReader(input), Out: &output, Err: &output})
+	})
+	return withOutput(err, &output)
 }
 
 // withOutput adds what Codex printed to an error, since it was hidden

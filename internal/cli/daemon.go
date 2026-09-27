@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -17,13 +16,14 @@ import (
 )
 
 // offerDaemonRestart runs after a command that may have changed the active
-// auth.json. The Codex app-server daemon caches credentials when it starts,
-// so if one is running it still uses the previous account until restarted.
-// A restart interrupts active sessions, so it only happens when the user
-// answers yes on a terminal; scripts get a hint instead. A daemon that is
-// not verifiably running is never restarted, since Codex would start one.
-func (a *app) offerDaemonRestart(cmd *cobra.Command, s *store.Store) {
-	if !s.AuthChanged() {
+// auth.json, and does nothing unless it did. The Codex app-server daemon
+// caches credentials when it starts, so if one is running it still uses the
+// previous account until restarted. A restart interrupts active sessions, so
+// it only happens when the user answers yes on a terminal; scripts get a
+// hint instead. A daemon that is not verifiably running is never restarted,
+// since Codex would start one.
+func (a *app) offerDaemonRestart(cmd *cobra.Command, s *store.Store, authChanged bool) {
+	if !authChanged {
 		return
 	}
 	state := s.Daemon()
@@ -66,7 +66,7 @@ func (a *app) offerDaemonRestart(cmd *cobra.Command, s *store.Store) {
 		return
 	}
 	if err := a.restartDaemon(cmd, s); err != nil {
-		printWarning(cmd, err.Error())
+		a.warn(cmd, err.Error())
 	}
 }
 
@@ -94,29 +94,17 @@ func (a *app) restartDaemon(cmd *cobra.Command, s *store.Store) error {
 		return fmt.Errorf("cannot restart the daemon: %w", err)
 	}
 	// Codex prints a JSON restart result on stdout. The command reports
-	// success itself; keep Codex's stderr for failure diagnostics. Behind a
-	// spinner that output is collected and shown only if the restart fails.
-	restart := func(errOut io.Writer) error {
-		if err := c.RestartDaemon(s.CodexHome, codex.Stdio{Out: io.Discard, Err: errOut}); err != nil {
+	// success itself; only Codex's stderr is kept, for failure diagnostics.
+	err = a.quietly(cmd, "Restarting the Codex app-server daemon", "", func(stdio codex.Stdio) error {
+		if err := c.RestartDaemon(s.CodexHome, codex.Stdio{Out: io.Discard, Err: stdio.Err}); err != nil {
 			return fmt.Errorf("restarting the Codex app-server daemon failed; check whether it is still running with 'codexctl doctor': %w", err)
 		}
 		return nil
-	}
-	if a.tui {
-		var diagnostics bytes.Buffer
-		err = tui.Spin(env(cmd), "Restarting the Codex app-server daemon", func() error { return restart(&diagnostics) })
-		if err != nil && !errors.Is(err, tui.ErrCancelled) && diagnostics.Len() > 0 {
-			fmt.Fprint(cmd.ErrOrStderr(), diagnostics.String())
-			a.record(tui.LevelInfo, strings.TrimSpace(diagnostics.String()))
-		}
-	} else {
-		err = restart(cmd.ErrOrStderr())
-	}
+	})
 	if err != nil {
 		return err
 	}
-	a.success(cmd, "Restarted the Codex app-server daemon", "It now uses the active auth.json.",
-		"Restarted the Codex app-server daemon; it now uses the active auth.json.")
+	a.success(cmd, say("Restarted the Codex app-server daemon").withHint("It now uses the active auth.json."))
 	return nil
 }
 
@@ -130,11 +118,7 @@ func (a *app) newRestartDaemonCommand() *cobra.Command {
 			"the only way to make it use a newly selected profile. Restarting interrupts every Codex\n" +
 			"session running on the daemon. Nothing happens unless a daemon is verifiably running.",
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, err := a.openStore()
-			if err != nil {
-				return err
-			}
+		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, _ []string) error {
 			var state store.DaemonState
 			if err := a.busy(cmd, "Looking for the Codex app-server daemon", func() error {
 				state = s.Daemon()
@@ -153,11 +137,11 @@ func (a *app) newRestartDaemonCommand() *cobra.Command {
 					"This interrupts every active Codex session; a turn in progress may be lost."); err != nil {
 					return err
 				}
-				return a.restartDaemon(cmd, s)
+			} else {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Restarting the Codex app-server daemon (pid %d); this interrupts active Codex sessions.\n", state.PID)
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "Restarting the Codex app-server daemon (pid %d); this interrupts active Codex sessions.\n", state.PID)
 			return a.restartDaemon(cmd, s)
-		},
+		}),
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask for confirmation on a terminal")
 	return cmd

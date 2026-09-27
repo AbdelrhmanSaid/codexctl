@@ -30,20 +30,16 @@ type DaemonState struct {
 	Profile string
 }
 
-// AuthChanged reports whether this Store changed the active auth.json,
-// including by finishing an interrupted switch.
-func (s *Store) AuthChanged() bool { return s.authChanged }
-
 // recordSwitch notes that the active auth.json now holds profile, or was
 // removed when profile is "". The record only feeds daemon diagnostics, so
 // failing to write it does not fail the switch.
-func (s *Store) recordSwitch(profile string) {
-	s.authChanged = true
-	data, err := json.Marshal(switchRecord{CodexHome: s.CodexHome, Profile: profile, Time: time.Now()})
+func (op *operation) recordSwitch(profile string) {
+	op.result.AuthChanged = true
+	data, err := json.Marshal(switchRecord{CodexHome: op.CodexHome, Profile: profile, Time: time.Now()})
 	if err != nil {
 		return
 	}
-	_ = writeFile(s.switchedPath(), append(data, '\n'), 0o600)
+	_ = writeFile(op.switchedPath(), append(data, '\n'), 0o600)
 }
 
 // lastSwitch returns the last recorded switch for this Codex home.

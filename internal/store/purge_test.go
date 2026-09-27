@@ -19,7 +19,7 @@ func TestPurgeRemovesStateButKeepsCodexHome(t *testing.T) {
 		t.Fatal("Purge did not run before")
 	}
 	assertMissing(t, s.StateHome)
-	assertFile(t, s.authPath(), active)
+	assertFile(t, s.AuthPath(), active)
 	assertFile(t, s.configPath(), config)
 }
 

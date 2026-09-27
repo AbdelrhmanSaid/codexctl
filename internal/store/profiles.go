@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // Profile describes a saved profile without exposing its credentials.
@@ -39,7 +38,7 @@ func (s *Store) Profiles() ([]Profile, error) {
 
 // Show returns the identity of one saved profile.
 func (s *Store) Show(name string) (Profile, error) {
-	if err := validateName(name); err != nil {
+	if err := ValidateName(name); err != nil {
 		return Profile{}, err
 	}
 	data, err := s.loadProfile(name)
@@ -58,53 +57,47 @@ func (s *Store) Show(name string) (Profile, error) {
 // Import saves the active auth.json as a new profile and selects it. It is
 // meant for accounts that were logged in with plain `codex login` before
 // codexctl was installed.
-func (s *Store) Import(name string) error {
-	if err := validateName(name); err != nil {
-		return err
+func (s *Store) Import(name string) (Result, error) {
+	if err := ValidateName(name); err != nil {
+		return Result{}, err
 	}
-	release, err := s.lock()
+	op, err := s.begin()
 	if err != nil {
-		return err
+		return Result{}, err
 	}
-	defer release()
-	if err := s.ensureStateLayout(); err != nil {
-		return err
-	}
-	if err := s.recoverPendingActivation(); err != nil {
-		return err
-	}
+	defer op.release()
 	exists, err := s.profileExists(name)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	if exists {
-		return fmt.Errorf("profile %q already exists; remove it first or choose another name", name)
+		return Result{}, fmt.Errorf("profile %q already exists; remove it first or choose another name", name)
 	}
-	data, err := readFile(s.authPath())
+	data, err := readFile(s.AuthPath())
 	if errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("no active auth.json in %s; run 'codexctl login %s' instead", s.CodexHome, name)
+		return Result{}, fmt.Errorf("no active auth.json in %s; run 'codexctl login %s' instead", s.CodexHome, name)
 	}
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	if _, err := parseAuth(data); err != nil {
-		return fmt.Errorf("active auth.json is invalid: %w", err)
+		return Result{}, fmt.Errorf("active auth.json is invalid: %w", err)
 	}
 	if owner, err := s.profileForAccount(data); err != nil {
-		return err
+		return Result{}, err
 	} else if owner != "" {
-		return fmt.Errorf("this account is already saved as profile %q; run 'codexctl use %s' or 'codexctl sync' instead", owner, owner)
+		return Result{}, fmt.Errorf("this account is already saved as profile %q; run 'codexctl use %s' or 'codexctl sync' instead", owner, owner)
 	}
 	if err := s.ensureFileCredentials(); err != nil {
-		return err
+		return Result{}, err
 	}
 	if err := writeFile(s.profilePath(name), data, 0o600); err != nil {
-		return fmt.Errorf("save profile: %w", err)
+		return Result{}, fmt.Errorf("save profile: %w", err)
 	}
-	if err := writeFile(s.currentPath(), []byte(name+"\n"), 0o600); err != nil {
-		return fmt.Errorf("record current profile: %w", err)
+	if err := s.selectProfile(name); err != nil {
+		return Result{}, err
 	}
-	return nil
+	return op.done(name)
 }
 
 // profileForAccount returns the name of the saved profile that holds the
@@ -127,27 +120,21 @@ func (s *Store) profileForAccount(data []byte) (string, error) {
 }
 
 // Sync saves credential refreshes from the active auth.json into the selected
-// profile and returns that profile's name.
-func (s *Store) Sync() (string, error) {
-	release, err := s.lock()
+// profile.
+func (s *Store) Sync() (Result, error) {
+	op, err := s.begin()
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
-	defer release()
-	if err := s.ensureStateLayout(); err != nil {
-		return "", err
-	}
-	if err := s.recoverPendingActivation(); err != nil {
-		return "", err
-	}
+	defer op.release()
 	name := s.selectedName()
 	if name == "" {
-		return "", errors.New("no profile has been selected")
+		return Result{}, errors.New("no profile has been selected")
 	}
 	if problem := s.syncCurrentProfile(); problem != "" {
-		return "", errors.New(problem)
+		return Result{}, errors.New(problem)
 	}
-	return name, nil
+	return op.done(name)
 }
 
 // Logout runs `codex logout` for a saved profile inside an isolated home, so
@@ -155,67 +142,60 @@ func (s *Store) Sync() (string, error) {
 // the profile. If the profile was selected and the active auth.json holds
 // the same account, that file is removed as well, since its tokens are no
 // longer usable.
-func (s *Store) Logout(name string, runLogout func(home string) error) (string, error) {
-	if err := validateName(name); err != nil {
-		return "", err
+func (s *Store) Logout(name string, runLogout func(home string) error) (Result, error) {
+	if err := ValidateName(name); err != nil {
+		return Result{}, err
 	}
-	release, err := s.lock()
+	op, err := s.begin()
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
-	defer release()
-	if err := s.ensureStateLayout(); err != nil {
-		return "", err
-	}
-	if err := s.recoverPendingActivation(); err != nil {
-		return "", err
-	}
+	defer op.release()
 	data, err := s.loadProfile(name)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
-	var warnings []string
 	selected := s.selectedName() == name
 	if selected {
 		// Log out with the freshest tokens Codex has written.
 		if problem := s.syncCurrentProfile(); problem != "" {
-			warnings = append(warnings, problem)
+			op.warn(problem)
 		} else if data, err = readFile(s.profilePath(name)); err != nil {
-			return "", err
+			return Result{}, err
 		}
 	}
 
 	tempHome, err := s.isolatedHome()
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	defer os.RemoveAll(tempHome)
 	if err := os.WriteFile(filepath.Join(tempHome, "auth.json"), data, 0o600); err != nil {
-		return "", fmt.Errorf("write isolated logout credentials: %w", err)
+		return Result{}, fmt.Errorf("write isolated logout credentials: %w", err)
 	}
 	if err := runLogout(tempHome); err != nil {
-		return "", fmt.Errorf("codex logout failed; profile %q was kept: %w", name, err)
+		return Result{}, fmt.Errorf("codex logout failed; profile %q was kept: %w", name, err)
 	}
 
 	if err := os.Remove(s.profilePath(name)); err != nil {
-		return "", fmt.Errorf("logged out, but the profile could not be removed: %w", err)
+		return Result{}, fmt.Errorf("logged out, but the profile could not be removed: %w", err)
 	}
 	if selected {
 		if err := removeIfExists(s.currentPath()); err != nil {
-			return "", fmt.Errorf("logged out, but the current profile marker could not be cleared: %w", err)
+			return Result{}, fmt.Errorf("logged out, but the current profile marker could not be cleared: %w", err)
 		}
-		active, err := readFile(s.authPath())
+		active, err := readFile(s.AuthPath())
 		if err == nil {
 			if match, err := compareAccounts(active, data); err == nil && match == accountSame {
-				if err := removeIfExists(s.authPath()); err != nil {
-					return "", fmt.Errorf("logged out, but the active auth.json could not be removed: %w", err)
+				if err := removeIfExists(s.AuthPath()); err != nil {
+					return Result{}, fmt.Errorf("logged out, but the active auth.json could not be removed: %w", err)
 				}
-				s.recordSwitch("")
-				warnings = append(warnings, "the active auth.json held the logged-out account and was removed; Codex is now signed out")
+				op.recordSwitch("")
+				op.warn("the active auth.json held the logged-out account and was removed; Codex is now signed out")
 			}
 		}
 	}
-	return strings.Join(warnings, "; "), nil
+	return op.done(name)
 }
 
 func removeIfExists(path string) error {

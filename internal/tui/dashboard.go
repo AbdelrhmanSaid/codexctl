@@ -68,22 +68,17 @@ const minRows = 3
 const scrollLines = 2
 
 type dashboardModel struct {
-	opts          DashboardOptions
-	theme         *Theme
-	cursor        int
-	width, height int // zero until the terminal's size is known
-	choice        DashboardChoice
-	done          bool
+	sized
+	opts   DashboardOptions
+	theme  *Theme
+	cursor int
+	choice DashboardChoice
+	done   bool
 }
 
 func (m *dashboardModel) Init() tea.Cmd { return nil }
 
-func (m *dashboardModel) resize(width, height int) { m.width, m.height = width, height }
-
 func (m *dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if size, ok := msg.(tea.WindowSizeMsg); ok {
-		m.resize(size.Width, size.Height)
-	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
@@ -303,7 +298,7 @@ func (s *Screen) Close() {
 func (s *Screen) Dashboard(opts DashboardOptions) (DashboardChoice, error) {
 	m := &dashboardModel{opts: opts, theme: s.env.theme(), cursor: max(0, min(opts.Cursor, len(opts.Rows)-1))}
 	_, _ = io.WriteString(s.env.Out, ansi.CursorHomePosition+ansi.EraseScreenBelow)
-	if _, err := run(s.env, m); err != nil {
+	if err := run(s.env, m); err != nil {
 		return DashboardChoice{}, err
 	}
 	return m.choice, nil

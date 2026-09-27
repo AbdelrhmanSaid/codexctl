@@ -35,20 +35,19 @@ type MultiSelectOptions struct {
 const maxRows = 8
 
 type listModel struct {
-	theme     *Theme
-	title     string
-	items     []Item
-	multi     bool
-	min       int
-	checked   []bool
-	filter    string
-	visible   []int // indexes into items that match the filter
-	cursor    int   // index into visible
-	offset    int   // first visible row drawn
-	width     int
-	problem   string
-	done      bool
-	cancelled bool
+	sized
+	outcome
+	theme   *Theme
+	title   string
+	items   []Item
+	multi   bool
+	min     int
+	checked []bool
+	filter  string
+	visible []int // indexes into items that match the filter
+	cursor  int   // index into visible
+	offset  int   // first visible row drawn
+	problem string
 }
 
 func newList(t *Theme, title string, items []Item, multi bool) *listModel {
@@ -102,12 +101,7 @@ func (m *listModel) chosen() []int {
 
 func (m *listModel) Init() tea.Cmd { return nil }
 
-func (m *listModel) resize(width, _ int) { m.width = width }
-
 func (m *listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if size, ok := msg.(tea.WindowSizeMsg); ok {
-		m.resize(size.Width, size.Height)
-	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
@@ -115,13 +109,13 @@ func (m *listModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.problem = ""
 	switch key.String() {
 	case "ctrl+c":
-		m.done, m.cancelled = true, true
+		m.cancel()
 	case "esc":
 		if m.filter != "" {
 			m.filter = ""
 			m.applyFilter()
 		} else {
-			m.done, m.cancelled = true, true
+			m.cancel()
 		}
 	case "up", "ctrl+p", "shift+tab":
 		m.moveTo(m.cursor - 1)
@@ -253,18 +247,12 @@ func (m *listModel) View() string {
 		fmt.Fprintf(&b, "  %s\n", t.Muted.Render(fmt.Sprintf("  ↓ %d more", rest)))
 	}
 	b.WriteString("\n")
-	if m.problem != "" {
-		for _, line := range t.note(Note{Text: m.problem, Level: LevelWarn}, m.width-2, false) {
-			fmt.Fprintf(&b, "  %s\n", line)
-		}
-	}
+	writeLines(&b, t.problem(m.problem, m.width-2))
 	hints := []string{"↑/↓", "move", "enter", "select", "type", "filter", "esc", "cancel"}
 	if m.multi {
 		hints = []string{"↑/↓", "move", "space", "toggle", "ctrl+a", "all", "enter", "confirm", "esc", "cancel"}
 	}
-	for _, line := range t.help(m.width-2, hints...) {
-		fmt.Fprintf(&b, "  %s\n", line)
-	}
+	writeLines(&b, t.help(m.width-2, hints...))
 	return b.String()
 }
 
@@ -317,11 +305,8 @@ func Select(env Env, opts SelectOptions) (int, error) {
 			m.moveTo(row)
 		}
 	}
-	if _, err := run(env, m); err != nil {
+	if err := ask(env, m); err != nil {
 		return -1, err
-	}
-	if m.cancelled {
-		return -1, ErrCancelled
 	}
 	return m.current(), nil
 }
@@ -330,11 +315,8 @@ func Select(env Env, opts SelectOptions) (int, error) {
 func MultiSelect(env Env, opts MultiSelectOptions) ([]int, error) {
 	m := newList(env.theme(), opts.Title, opts.Items, true)
 	m.min = opts.Min
-	if _, err := run(env, m); err != nil {
+	if err := ask(env, m); err != nil {
 		return nil, err
-	}
-	if m.cancelled {
-		return nil, ErrCancelled
 	}
 	return m.chosen(), nil
 }

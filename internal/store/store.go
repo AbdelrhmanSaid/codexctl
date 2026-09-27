@@ -24,8 +24,6 @@ type Store struct {
 	// DetectDaemon inspects the app-server daemon of a Codex home. Nil means
 	// daemon.Detect; tests substitute a fake.
 	DetectDaemon func(codexHome string) daemon.Status
-
-	authChanged bool
 }
 
 type Check struct {
@@ -49,56 +47,49 @@ func NewFromEnvironment() (*Store, error) {
 	return &Store{CodexHome: filepath.Clean(codexHome), StateHome: filepath.Clean(stateHome)}, nil
 }
 
-func (s *Store) Login(name string, runLogin func(home string) error) (string, error) {
-	if err := validateName(name); err != nil {
-		return "", err
+// Login runs codex login in an isolated home, saves the login it produced
+// as a profile and selects it.
+func (s *Store) Login(name string, runLogin func(home string) error) (Result, error) {
+	if err := ValidateName(name); err != nil {
+		return Result{}, err
 	}
-	release, err := s.lock()
+	op, err := s.open()
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
-	defer release()
-	if err := s.ensureStateLayout(); err != nil {
-		return "", err
-	}
+	defer op.release()
 
 	tempHome, err := s.isolatedHome()
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	defer os.RemoveAll(tempHome)
 	if err := runLogin(tempHome); err != nil {
-		return "", fmt.Errorf("codex login failed: %w", err)
+		return Result{}, fmt.Errorf("codex login failed: %w", err)
 	}
 	loggedIn := filepath.Join(tempHome, "auth.json")
 	if _, err := readAuth(loggedIn); err != nil {
-		return "", fmt.Errorf("codex login did not produce a valid file-backed login: %w", err)
+		return Result{}, fmt.Errorf("codex login did not produce a valid file-backed login: %w", err)
 	}
 	data, err := readFile(loggedIn)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	// Do not touch the real Codex home until the isolated login has succeeded
 	// and produced a valid auth.json.
-	if err := s.ensureCodexLayout(); err != nil {
-		return "", err
-	}
-	if err := s.recoverPendingActivation(); err != nil {
-		return "", err
-	}
-	if err := s.ensureFileCredentials(); err != nil {
-		return "", err
+	if err := op.prepareCodexHome(); err != nil {
+		return Result{}, err
 	}
 	// Save refreshes for the previously selected profile before replacing a
 	// profile with the new login. This ordering also makes re-login safe.
-	warning := s.syncCurrentProfile()
+	op.warn(s.syncCurrentProfile())
 	if err := writeFile(s.profilePath(name), data, 0o600); err != nil {
-		return "", fmt.Errorf("save profile: %w", err)
+		return Result{}, fmt.Errorf("save profile: %w", err)
 	}
-	if err := s.writeActive(name, data); err != nil {
-		return "", err
+	if err := op.writeActive(name, data); err != nil {
+		return Result{}, err
 	}
-	return warning, nil
+	return op.done(name)
 }
 
 // isolatedHome creates a private temporary CODEX_HOME configured for
@@ -134,33 +125,29 @@ func (s *Store) removeAbandonedLogins() {
 	}
 }
 
-func (s *Store) Use(name string) (string, error) {
-	if err := validateName(name); err != nil {
-		return "", err
+// Use makes a saved profile the active login.
+func (s *Store) Use(name string) (Result, error) {
+	if err := ValidateName(name); err != nil {
+		return Result{}, err
 	}
-	release, err := s.lock()
+	op, err := s.open()
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
-	defer release()
-	if err := s.ensureStateLayout(); err != nil {
-		return "", err
-	}
+	defer op.release()
 	// Load and validate the requested profile before changing config.toml.
 	data, err := s.loadProfile(name)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
-	if err := s.ensureCodexLayout(); err != nil {
-		return "", err
+	if err := op.prepareCodexHome(); err != nil {
+		return Result{}, err
 	}
-	if err := s.recoverPendingActivation(); err != nil {
-		return "", err
+	op.warn(s.syncCurrentProfile())
+	if err := op.writeActive(name, data); err != nil {
+		return Result{}, err
 	}
-	if err := s.ensureFileCredentials(); err != nil {
-		return "", err
-	}
-	return s.activateLocked(name, data)
+	return op.done(name)
 }
 
 func (s *Store) loadProfile(name string) ([]byte, error) {
@@ -177,70 +164,6 @@ func (s *Store) loadProfile(name string) ([]byte, error) {
 	return data, nil
 }
 
-func (s *Store) activateLocked(name string, data []byte) (string, error) {
-	warning := s.syncCurrentProfile()
-	if err := s.writeActive(name, data); err != nil {
-		return "", err
-	}
-	return warning, nil
-}
-
-func (s *Store) writeActive(name string, data []byte) error {
-	if err := writeFile(s.pendingPath(), []byte(name+"\n"), 0o600); err != nil {
-		return fmt.Errorf("record pending activation: %w", err)
-	}
-	if err := s.finishActivation(name, data); err != nil {
-		return fmt.Errorf("activation is incomplete and will be resumed by the next login or use: %w", err)
-	}
-	return s.clearPendingActivation()
-}
-
-func (s *Store) finishActivation(name string, data []byte) error {
-	if err := writeFile(s.authPath(), data, 0o600); err != nil {
-		return fmt.Errorf("activate profile: %w", err)
-	}
-	s.recordSwitch(name)
-	if err := writeFile(s.currentPath(), []byte(name+"\n"), 0o600); err != nil {
-		return fmt.Errorf("record current profile: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) clearPendingActivation() error {
-	if err := refuseSymlink(s.pendingPath()); err != nil {
-		return err
-	}
-	if err := os.Remove(s.pendingPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("activation completed but its recovery marker could not be removed: %w", err)
-	}
-	return nil
-}
-
-// recoverPendingActivation completes a switch interrupted after its durable
-// marker was written. The caller holds the store lock, so the profile cannot
-// be changed concurrently by another codexctl process.
-func (s *Store) recoverPendingActivation() error {
-	data, err := readFile(s.pendingPath())
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read pending activation: %w", err)
-	}
-	name := strings.TrimSpace(string(data))
-	if err := validateName(name); err != nil {
-		return fmt.Errorf("pending activation marker is invalid: %w", err)
-	}
-	profile, err := s.loadProfile(name)
-	if err != nil {
-		return fmt.Errorf("recover pending activation: %w", err)
-	}
-	if err := s.finishActivation(name, profile); err != nil {
-		return fmt.Errorf("recover pending activation: %w", err)
-	}
-	return s.clearPendingActivation()
-}
-
 // syncCurrentProfile preserves refresh-token changes written by Codex while a
 // profile was active. An account ID mismatch means another tool/login changed
 // auth.json, so overwriting the saved profile would be unsafe.
@@ -250,10 +173,10 @@ func (s *Store) syncCurrentProfile() string {
 		return ""
 	}
 	name := strings.TrimSpace(string(currentBytes))
-	if validateName(name) != nil {
+	if ValidateName(name) != nil {
 		return "the selected-profile marker is invalid; skipped saving active credential changes"
 	}
-	activeData, err := readFile(s.authPath())
+	activeData, err := readFile(s.AuthPath())
 	if err != nil {
 		return "the active auth.json could not be read; skipped saving credential changes"
 	}
@@ -303,10 +226,10 @@ func (s *Store) Current() (string, bool, error) {
 		return "", false, err
 	}
 	name := strings.TrimSpace(string(data))
-	if err := validateName(name); err != nil {
+	if err := ValidateName(name); err != nil {
 		return "", false, err
 	}
-	active, err := readFile(s.authPath())
+	active, err := readFile(s.AuthPath())
 	if errors.Is(err, fs.ErrNotExist) {
 		return name, false, nil
 	}
@@ -338,9 +261,9 @@ func (s *Store) Doctor() []Check {
 	} else {
 		checks = append(checks, Check{"file-backed credential storage is configured", false})
 	}
-	if err := refuseSymlink(s.authPath()); err != nil {
+	if err := refuseSymlink(s.AuthPath()); err != nil {
 		checks = append(checks, Check{err.Error(), true})
-	} else if _, err := readAuth(s.authPath()); err != nil {
+	} else if _, err := readAuth(s.AuthPath()); err != nil {
 		checks = append(checks, Check{"active auth.json is missing or invalid", true})
 	} else {
 		checks = append(checks, Check{"active auth.json is valid JSON and is not a symlink", false})
@@ -364,9 +287,7 @@ func (s *Store) Doctor() []Check {
 }
 
 // ValidateName reports whether name can be used as a profile name.
-func ValidateName(name string) error { return validateName(name) }
-
-func validateName(name string) error {
+func ValidateName(name string) error {
 	if !profileNamePattern.MatchString(name) {
 		return errors.New("profile names must be 1-64 characters using letters, digits, '.', '_' or '-', and must start with a letter or digit")
 	}

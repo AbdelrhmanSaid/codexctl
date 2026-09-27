@@ -18,12 +18,11 @@ type ConfirmOptions struct {
 }
 
 type confirmModel struct {
-	opts      ConfirmOptions
-	theme     *Theme
-	width     int
-	yes       bool
-	done      bool
-	cancelled bool
+	sized
+	outcome
+	opts  ConfirmOptions
+	theme *Theme
+	yes   bool
 }
 
 func newConfirm(t *Theme, opts ConfirmOptions) *confirmModel {
@@ -38,12 +37,7 @@ func newConfirm(t *Theme, opts ConfirmOptions) *confirmModel {
 
 func (m *confirmModel) Init() tea.Cmd { return nil }
 
-func (m *confirmModel) resize(width, _ int) { m.width = width }
-
 func (m *confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if size, ok := msg.(tea.WindowSizeMsg); ok {
-		m.resize(size.Width, size.Height)
-	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
@@ -58,7 +52,8 @@ func (m *confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "enter", " ":
 		m.done = true
 	case "esc", "ctrl+c", "q":
-		m.yes, m.done, m.cancelled = false, true, true
+		m.yes = false
+		m.cancel()
 	}
 	if m.done {
 		return m, tea.Quit
@@ -80,11 +75,7 @@ func (m *confirmModel) View() string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", t.question(m.opts.Title))
-	for _, text := range m.opts.Description {
-		for _, line := range wrap(text, m.width-2) {
-			fmt.Fprintf(&b, "  %s\n", t.Muted.Render(line))
-		}
-	}
+	writeLines(&b, t.describe(m.opts.Description, m.width-2))
 	yes, no := t.Button, t.ButtonOn
 	if m.yes {
 		yes, no = t.ButtonOn, t.Button
@@ -93,35 +84,15 @@ func (m *confirmModel) View() string {
 		}
 	}
 	fmt.Fprintf(&b, "\n  %s %s\n\n", yes.Render(m.opts.Affirmative), no.Render(m.opts.Negative))
-	for _, line := range t.help(m.width-2, "←/→", "switch", "y/n", "choose", "enter", "confirm", "esc", "cancel") {
-		fmt.Fprintf(&b, "  %s\n", line)
-	}
+	writeLines(&b, t.help(m.width-2, "←/→", "switch", "y/n", "choose", "enter", "confirm", "esc", "cancel"))
 	return b.String()
 }
 
 // Confirm asks a yes/no question. Esc and Ctrl-C return ErrCancelled.
 func Confirm(env Env, opts ConfirmOptions) (bool, error) {
 	m := newConfirm(env.theme(), opts)
-	if _, err := run(env, m); err != nil {
+	if err := ask(env, m); err != nil {
 		return false, err
 	}
-	if m.cancelled {
-		return false, ErrCancelled
-	}
 	return m.yes, nil
-}
-
-// resizer is a model that lays itself out for the size of the terminal.
-type resizer interface {
-	resize(width, height int)
-}
-
-// run starts an inline program, never in the alternate screen, so every
-// finished prompt leaves a one-line record in the scrollback. The model is
-// told the terminal's size up front, so its first frame already fits.
-func run(env Env, m tea.Model) (tea.Model, error) {
-	if r, ok := m.(resizer); ok {
-		r.resize(size(env.Out))
-	}
-	return tea.NewProgram(m, tea.WithInput(env.In), tea.WithOutput(env.Out)).Run()
 }

@@ -4,7 +4,8 @@ import "path/filepath"
 
 // Files owned by Codex.
 
-func (s *Store) authPath() string   { return filepath.Join(s.CodexHome, "auth.json") }
+// AuthPath is the active Codex credential file.
+func (s *Store) AuthPath() string   { return filepath.Join(s.CodexHome, "auth.json") }
 func (s *Store) configPath() string { return filepath.Join(s.CodexHome, "config.toml") }
 
 // Files owned by codexctl.
@@ -18,6 +19,3 @@ func (s *Store) profilesDir() string  { return filepath.Join(s.StateHome, "profi
 func (s *Store) profilePath(name string) string {
 	return filepath.Join(s.profilesDir(), name+".json")
 }
-
-// AuthPath is the active Codex credential file.
-func (s *Store) AuthPath() string { return s.authPath() }

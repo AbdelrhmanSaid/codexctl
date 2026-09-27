@@ -128,8 +128,11 @@ func assertCurrent(t *testing.T, s *Store, want string) {
 	}
 }
 
-func assertWarning(t *testing.T, warning, want string) {
+// assertWarning checks that the result warns about want, or about nothing
+// when want is empty.
+func assertWarning(t *testing.T, result Result, want string) {
 	t.Helper()
+	warning := strings.Join(result.Warnings, "; ")
 	if want == "" && warning != "" {
 		t.Fatalf("unexpected warning: %s", warning)
 	}

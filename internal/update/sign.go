@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"strings"
 )
 
@@ -58,7 +57,7 @@ func Verify(key ed25519.PublicKey, data, signature []byte) error {
 		return errors.New("signature is malformed")
 	}
 	if !ed25519.Verify(key, data, sig) {
-		return fmt.Errorf("signature does not match the release public key")
+		return errors.New("signature does not match the release public key")
 	}
 	return nil
 }

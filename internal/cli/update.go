@@ -34,10 +34,9 @@ func (a *app) newUpdateCommand() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			current := buildVersion()
-			releaseBuild := version != "dev"
-			exe, err := update.Executable()
+			exe, method, err := a.executable()
 			if err != nil {
-				return fmt.Errorf("locate executable: %w", err)
+				return err
 			}
 			client, err := update.NewClient(current)
 			if err != nil {
@@ -72,7 +71,7 @@ func (a *app) newUpdateCommand() *cobra.Command {
 				return nil
 			}
 			if !force {
-				switch update.DetectInstall(releaseBuild, exe) {
+				switch method {
 				case update.MethodGoInstall:
 					return fmt.Errorf("codexctl was installed with 'go install'; run 'go install github.com/%s@latest' instead, or pass --force to replace %s", update.Repo, exe)
 				case update.MethodPackage:
@@ -81,14 +80,13 @@ func (a *app) newUpdateCommand() *cobra.Command {
 					return fmt.Errorf("this is a development build; install a release from https://github.com/%s/releases, or pass --force to replace %s", update.Repo, exe)
 				}
 				if cmp == 0 {
-					a.success(cmd, "codexctl "+current+" is already installed", "", fmt.Sprintf("codexctl %s is already installed.", current))
+					a.success(cmd, say("codexctl %s is already installed", current))
 					return nil
 				}
 				if cmp < 0 {
 					if target == "" {
-						a.success(cmd, fmt.Sprintf("codexctl %s is installed and is newer than release %s", current, release.Version),
-							fmt.Sprintf("Pass --to %s --force to downgrade.", release.Version),
-							fmt.Sprintf("codexctl %s is installed and is newer than release %s. Pass --to %s --force to downgrade.", current, release.Version, release.Version))
+						a.success(cmd, say("codexctl %s is installed and is newer than release %s", current, release.Version).
+							withHint(fmt.Sprintf("Pass --to %s --force to downgrade.", release.Version)))
 						return nil
 					}
 					return fmt.Errorf("codexctl %s is newer than %s; pass --force to downgrade", current, release.Version)
@@ -128,8 +126,7 @@ func (a *app) newUpdateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			a.success(cmd, fmt.Sprintf("Updated codexctl from %s to %s", current, release.Version), "",
-				fmt.Sprintf("Updated codexctl from %s to %s at %s.", current, release.Version, exe))
+			a.success(cmd, say("Updated codexctl from %s to %s at %s", current, release.Version, filePath(exe)))
 			return nil
 		},
 	}
@@ -141,24 +138,18 @@ func (a *app) newUpdateCommand() *cobra.Command {
 
 // reportUpdateCheck prints the result of update --check.
 func (a *app) reportUpdateCheck(cmd *cobra.Command, current, latest string, cmp int) {
-	var styled, hint, plain string
 	switch {
 	case current == "dev":
-		styled = "The latest release is codexctl " + latest
-		hint = "This is a development build, so it cannot be compared."
-		plain = fmt.Sprintf("The latest release is codexctl %s. This is a development build, so it cannot be compared.", latest)
+		a.success(cmd, say("The latest release is codexctl %s", latest).
+			withHint("This is a development build, so it cannot be compared."))
 	case cmp > 0:
-		styled = fmt.Sprintf("codexctl %s is available (installed %s)", latest, current)
-		hint = "Run 'codexctl update' to install it."
-		plain = fmt.Sprintf("codexctl %s is available (installed %s). Run 'codexctl update' to install it.", latest, current)
+		a.success(cmd, say("codexctl %s is available (installed %s)", latest, current).
+			withHint("Run 'codexctl update' to install it."))
 	case cmp < 0:
-		styled = fmt.Sprintf("codexctl %s is installed and is newer than release %s", current, latest)
-		plain = styled + "."
+		a.success(cmd, say("codexctl %s is installed and is newer than release %s", current, latest))
 	default:
-		styled = fmt.Sprintf("codexctl %s is up to date", current)
-		plain = styled + "."
+		a.success(cmd, say("codexctl %s is up to date", current))
 	}
-	a.success(cmd, styled, hint, plain)
 }
 
 // byteSize renders a size such as "4.2 MB".

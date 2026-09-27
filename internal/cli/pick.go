@@ -57,15 +57,9 @@ func (a *app) profileArg(cmd *cobra.Command, s *store.Store, args []string, titl
 	if len(args) > 0 {
 		return args[0], nil
 	}
-	if !a.tui {
-		return "", fmt.Errorf("missing PROFILE_NAME; usage: %s", cmd.UseLine())
-	}
-	profiles, err := s.Profiles()
+	profiles, err := a.profilesToPick(cmd, s)
 	if err != nil {
 		return "", err
-	}
-	if len(profiles) == 0 {
-		return "", errNoProfiles
 	}
 	items, cursor := profileItems(profiles, allowInvalid)
 	i, err := tui.Select(env(cmd), tui.SelectOptions{Title: title, Items: items, Cursor: cursor})
@@ -81,15 +75,9 @@ func (a *app) profileArgs(cmd *cobra.Command, s *store.Store, args []string, tit
 	if len(args) > 0 {
 		return args, nil
 	}
-	if !a.tui {
-		return nil, fmt.Errorf("missing PROFILE_NAME; usage: %s", cmd.UseLine())
-	}
-	profiles, err := s.Profiles()
+	profiles, err := a.profilesToPick(cmd, s)
 	if err != nil {
 		return nil, err
-	}
-	if len(profiles) == 0 {
-		return nil, errNoProfiles
 	}
 	items, _ := profileItems(profiles, true)
 	chosen, err := tui.MultiSelect(env(cmd), tui.MultiSelectOptions{Title: title, Items: items, Min: 1})
@@ -101,6 +89,22 @@ func (a *app) profileArgs(cmd *cobra.Command, s *store.Store, args []string, tit
 		names[i] = profiles[index].Name
 	}
 	return names, nil
+}
+
+// profilesToPick returns the saved profiles for a list the user picks from.
+// It fails when there is no terminal to ask on or nothing to pick.
+func (a *app) profilesToPick(cmd *cobra.Command, s *store.Store) ([]store.Profile, error) {
+	if !a.tui {
+		return nil, fmt.Errorf("missing PROFILE_NAME; usage: %s", cmd.UseLine())
+	}
+	profiles, err := s.Profiles()
+	if err != nil {
+		return nil, err
+	}
+	if len(profiles) == 0 {
+		return nil, errNoProfiles
+	}
+	return profiles, nil
 }
 
 // newNameArg returns the argument at index, called argName in usage, as a

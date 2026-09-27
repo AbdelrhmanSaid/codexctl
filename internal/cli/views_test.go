@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/AbdelrhmanSaid/codexctl/internal/tui"
 )
 
 func TestByteSize(t *testing.T) {
@@ -30,5 +32,19 @@ func TestRelativeTime(t *testing.T) {
 		if got := ago(d); got != want {
 			t.Fatalf("ago(%v) = %q, want %q", d, got, want)
 		}
+	}
+}
+
+func TestMessageIsWrittenOnce(t *testing.T) {
+	m := say("Renamed profile %s to %s", profileName("work"), profileName("job"))
+	if got, want := m.plain(), `Renamed profile "work" to "job".`; got != want {
+		t.Fatalf("plain = %q, want %q", got, want)
+	}
+	m = say("Kept saved profiles in %s", filePath("/srv/state")).withHint("Delete that directory to remove them.")
+	if got, want := m.plain(), "Kept saved profiles in /srv/state. Delete that directory to remove them."; got != want {
+		t.Fatalf("plain = %q, want %q", got, want)
+	}
+	if got, want := m.styled(tui.NewTheme(&strings.Builder{})), "Kept saved profiles in /srv/state"; got != want {
+		t.Fatalf("styled = %q, want %q", got, want)
 	}
 }

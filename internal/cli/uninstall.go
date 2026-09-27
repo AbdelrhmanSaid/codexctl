@@ -104,14 +104,13 @@ func (a *app) newUninstallCommand() *cobra.Command {
 				return err
 			}
 			if exe != "" {
-				a.success(cmd, "Removed "+displayPath(exe), "", fmt.Sprintf("Removed %s.", exe))
+				a.success(cmd, say("Removed %s", filePath(exe)))
 			}
 			if purge {
-				a.success(cmd, "Deleted saved profiles and codexctl state in "+displayPath(s.StateHome), "",
-					fmt.Sprintf("Deleted saved profiles and codexctl state in %s.", s.StateHome))
+				a.success(cmd, say("Deleted saved profiles and codexctl state in %s", filePath(s.StateHome)))
 			} else {
-				a.success(cmd, "Kept saved profiles in "+displayPath(s.StateHome), "Delete that directory, or run 'codexctl uninstall --purge', to remove them.",
-					fmt.Sprintf("Kept saved profiles in %s; delete that directory to remove them.", s.StateHome))
+				a.success(cmd, say("Kept saved profiles in %s", filePath(s.StateHome)).
+					withHint("Delete that directory, or run 'codexctl uninstall --purge', to remove them."))
 			}
 			return nil
 		},

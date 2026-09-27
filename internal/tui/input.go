@@ -20,13 +20,12 @@ type InputOptions struct {
 }
 
 type inputModel struct {
-	opts      InputOptions
-	theme     *Theme
-	input     textinput.Model
-	width     int
-	problem   string
-	done      bool
-	cancelled bool
+	sized
+	outcome
+	opts    InputOptions
+	theme   *Theme
+	input   textinput.Model
+	problem string
 }
 
 func newInput(t *Theme, opts InputOptions) *inputModel {
@@ -47,17 +46,11 @@ func newInput(t *Theme, opts InputOptions) *inputModel {
 
 func (m *inputModel) Init() tea.Cmd { return textinput.Blink }
 
-func (m *inputModel) resize(width, _ int) { m.width = width }
-
 func (m *inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if size, ok := msg.(tea.WindowSizeMsg); ok {
-		m.resize(size.Width, size.Height)
-		return m, nil
-	}
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "ctrl+c", "esc":
-			m.done, m.cancelled = true, true
+			m.cancel()
 			return m, tea.Quit
 		case "enter":
 			value := strings.TrimSpace(m.input.Value())
@@ -107,32 +100,19 @@ func (m *inputModel) View() string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", t.question(m.opts.Title))
-	for _, text := range m.opts.Description {
-		for _, line := range wrap(text, m.width-2) {
-			fmt.Fprintf(&b, "  %s\n", t.Muted.Render(line))
-		}
-	}
-	fmt.Fprintf(&b, "  %s\n", m.input.View())
-	if m.problem != "" {
-		for _, line := range t.note(Note{Text: m.problem, Level: LevelWarn}, m.width-2, false) {
-			fmt.Fprintf(&b, "  %s\n", line)
-		}
-	}
+	writeLines(&b, t.describe(m.opts.Description, m.width-2))
+	writeLines(&b, []string{m.input.View()})
+	writeLines(&b, t.problem(m.problem, m.width-2))
 	b.WriteString("\n")
-	for _, line := range t.help(m.width-2, "enter", "confirm", "esc", "cancel") {
-		fmt.Fprintf(&b, "  %s\n", line)
-	}
+	writeLines(&b, t.help(m.width-2, "enter", "confirm", "esc", "cancel"))
 	return b.String()
 }
 
 // Input asks for one line of text and returns it without surrounding space.
 func Input(env Env, opts InputOptions) (string, error) {
 	m := newInput(env.theme(), opts)
-	if _, err := run(env, m); err != nil {
+	if err := ask(env, m); err != nil {
 		return "", err
-	}
-	if m.cancelled {
-		return "", ErrCancelled
 	}
 	return m.input.Value(), nil
 }

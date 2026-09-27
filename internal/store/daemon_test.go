@@ -13,12 +13,6 @@ func fakeDaemon(status daemon.Status) func(string) daemon.Status {
 	return func(string) daemon.Status { return status }
 }
 
-// reopen returns a fresh Store on the same directories, as a new codexctl
-// process would see them.
-func reopen(s *Store) *Store {
-	return &Store{CodexHome: s.CodexHome, StateHome: s.StateHome, DetectDaemon: s.DetectDaemon}
-}
-
 func assertSwitch(t *testing.T, s *Store, profile string) {
 	t.Helper()
 	record, ok := s.lastSwitch()
@@ -38,22 +32,22 @@ func assertSwitch(t *testing.T, s *Store, profile string) {
 
 func TestLoginAndUseRecordSwitch(t *testing.T) {
 	s := newTestStore(t)
-	mustLogin(t, s, "a", chatgptAuth(t, "acct-a", "r1"))
-	if !s.AuthChanged() {
-		t.Fatal("login did not report an auth change")
+	result, err := s.Login("a", fakeLogin(chatgptAuth(t, "acct-a", "r1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.AuthChanged || result.Profile != "a" {
+		t.Fatalf("login result = %+v, want an auth change for a", result)
 	}
 	assertSwitch(t, s, "a")
 
 	mustLogin(t, s, "b", chatgptAuth(t, "acct-b", "r1"))
-	s = reopen(s)
-	if s.AuthChanged() {
-		t.Fatal("a fresh store reports an auth change")
-	}
-	if _, err := s.Use("a"); err != nil {
+	result, err = s.Use("a")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !s.AuthChanged() {
-		t.Fatal("use did not report an auth change")
+	if !result.AuthChanged || result.Profile != "a" {
+		t.Fatalf("use result = %+v, want an auth change for a", result)
 	}
 	assertSwitch(t, s, "a")
 }
@@ -63,24 +57,28 @@ func TestCommandsThatKeepAuthDoNotRecordSwitch(t *testing.T) {
 	mustLogin(t, s, "a", chatgptAuth(t, "acct-a", "r1"))
 	mustLogin(t, s, "b", chatgptAuth(t, "acct-b", "r1"))
 
-	s = reopen(s)
-	if _, err := s.Rename("b", "c"); err != nil {
-		t.Fatal(err)
+	operations := []struct {
+		name string
+		run  func() (Result, error)
+	}{
+		{"rename", func() (Result, error) { return s.Rename("b", "c") }},
+		{"remove", func() (Result, error) { return s.Remove("a") }},
+		{"sync", s.Sync},
 	}
-	if _, err := s.Remove("a"); err != nil {
-		t.Fatal(err)
+	for _, operation := range operations {
+		result, err := operation.run()
+		if err != nil {
+			t.Fatalf("%s: %v", operation.name, err)
+		}
+		if result.AuthChanged {
+			t.Fatalf("%s reported an auth change", operation.name)
+		}
 	}
-	if _, err := s.Sync(); err != nil {
-		t.Fatal(err)
+	if result, err := s.Import("d"); err == nil || result.AuthChanged {
+		t.Fatalf("import of a saved account: result = %+v, err = %v", result, err)
 	}
-	if err := s.Import("d"); err == nil {
-		t.Fatal("import of a saved account succeeded")
-	}
-	if _, err := s.Logout("a", func(string) error { return nil }); err == nil {
-		t.Fatal("logout of a removed profile succeeded")
-	}
-	if s.AuthChanged() {
-		t.Fatal("auth was reported changed")
+	if result, err := s.Logout("a", func(string) error { return nil }); err == nil || result.AuthChanged {
+		t.Fatalf("logout of a removed profile: result = %+v, err = %v", result, err)
 	}
 	assertSwitch(t, s, "b")
 }
@@ -91,39 +89,52 @@ func TestLogoutRecordsSignOut(t *testing.T) {
 	mustLogin(t, s, "b", chatgptAuth(t, "acct-b", "r1"))
 
 	// Logging out an unselected profile leaves auth.json alone.
-	s = reopen(s)
-	if _, err := s.Logout("a", func(string) error { return nil }); err != nil {
+	result, err := s.Logout("a", func(string) error { return nil })
+	if err != nil {
 		t.Fatal(err)
 	}
-	if s.AuthChanged() {
+	if result.AuthChanged {
 		t.Fatal("logging out an unselected profile reported an auth change")
 	}
 
-	s = reopen(s)
-	if _, err := s.Logout("b", func(string) error { return nil }); err != nil {
+	result, err = s.Logout("b", func(string) error { return nil })
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !s.AuthChanged() {
+	if !result.AuthChanged {
 		t.Fatal("removing auth.json did not report an auth change")
 	}
-	assertMissing(t, s.authPath())
+	assertMissing(t, s.AuthPath())
 	assertSwitch(t, s, "")
 }
 
+// Any operation can finish an interrupted switch, and must say that it
+// changed auth.json when it does.
 func TestFinishingInterruptedSwitchRecordsIt(t *testing.T) {
-	s := newTestStore(t)
-	mustLogin(t, s, "a", chatgptAuth(t, "acct-a", "r1"))
-	mustLogin(t, s, "b", chatgptAuth(t, "acct-b", "r1"))
-	writeBytes(t, s.pendingPath(), []byte("a\n"))
+	operations := map[string]func(s *Store) (Result, error){
+		"sync":   (*Store).Sync,
+		"rename": func(s *Store) (Result, error) { return s.Rename("b", "c") },
+		"remove": func(s *Store) (Result, error) { return s.Remove("b") },
+		"logout": func(s *Store) (Result, error) { return s.Logout("b", func(string) error { return nil }) },
+		"use":    func(s *Store) (Result, error) { return s.Use("a") },
+	}
+	for name, run := range operations {
+		t.Run(name, func(t *testing.T) {
+			s := newTestStore(t)
+			mustLogin(t, s, "a", chatgptAuth(t, "acct-a", "r1"))
+			mustLogin(t, s, "b", chatgptAuth(t, "acct-b", "r1"))
+			writeBytes(t, s.pendingPath(), []byte("a\n"))
 
-	s = reopen(s)
-	if _, err := s.Sync(); err != nil {
-		t.Fatal(err)
+			result, err := run(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !result.AuthChanged {
+				t.Fatal("recovery did not report an auth change")
+			}
+			assertSwitch(t, s, "a")
+		})
 	}
-	if !s.AuthChanged() {
-		t.Fatal("recovery did not report an auth change")
-	}
-	assertSwitch(t, s, "a")
 }
 
 func TestDaemonStaleness(t *testing.T) {
