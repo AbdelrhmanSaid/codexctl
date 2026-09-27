@@ -45,6 +45,8 @@ type codexCLI interface {
 type app struct {
 	openStore func() (*store.Store, error)
 	findCodex func() (codexCLI, error)
+	// executable locates the running binary and how it was installed.
+	executable func() (string, update.Method, error)
 	// interactive is whether stdin is a terminal, so commands may ask
 	// before restarting the daemon.
 	interactive bool
@@ -60,6 +62,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 			}
 			return c, nil
 		},
+		executable: findExecutable,
 	}
 	if f, ok := stdin.(*os.File); ok {
 		a.interactive = isTerminal(f)
@@ -95,6 +98,7 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 		a.newDoctorCommand(),
 		a.newRestartDaemonCommand(),
 		newUpdateCommand(),
+		a.newUninstallCommand(),
 		newCompletionCommand(root),
 	)
 	return root

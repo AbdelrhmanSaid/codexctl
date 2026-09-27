@@ -15,6 +15,7 @@ codexctl rename personal home
 codexctl remove work
 codexctl logout existing
 codexctl restart-daemon         # make a running Codex daemon reload the switch
+codexctl uninstall --purge      # remove codexctl and every saved profile
 ```
 
 `list`, `current`, `show`, and `doctor` accept `--json` for scripting.
@@ -117,6 +118,28 @@ moved aside as `codexctl.exe.old` and cleaned up by the next update.
 Binaries installed with a Linux package or `go install` are told to update the
 same way they were installed. `--force` overrides that, and is also required to
 downgrade with `--to`. `update` never contacts the network unless you run it.
+
+### Uninstalling
+
+```console
+codexctl uninstall                        # remove the executable, keep saved profiles
+codexctl uninstall --purge                # also delete ~/.codexctl and every saved profile
+codexctl uninstall --purge --keep-binary  # delete only the saved profiles and state
+```
+
+`uninstall` lists what it will remove and asks before doing it; pass `--yes`
+to skip the question, which is required when stdin is not a terminal. It
+never touches `CODEX_HOME`: the active `auth.json` and the
+`cli_auth_credentials_store = "file"` setting in `config.toml` stay in place,
+so Codex stays logged in with the currently selected account. Deleted
+profiles cannot be recovered, so accounts that are not active must log in
+again.
+
+Binaries installed with a Linux package are not removed; uninstall those with
+the package manager, after `codexctl uninstall --purge --keep-binary` if you
+also want the profiles gone. On Windows, `install.ps1` added the install
+directory to your user `PATH`; remove that entry by hand if you no longer
+need it.
 
 ## Releasing
 

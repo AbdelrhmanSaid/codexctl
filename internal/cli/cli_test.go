@@ -14,6 +14,7 @@ import (
 	"github.com/AbdelrhmanSaid/codexctl/internal/codex"
 	"github.com/AbdelrhmanSaid/codexctl/internal/daemon"
 	"github.com/AbdelrhmanSaid/codexctl/internal/store"
+	"github.com/AbdelrhmanSaid/codexctl/internal/update"
 )
 
 // fakeCodex stands in for the codex executable. Login writes auth for the
@@ -45,6 +46,8 @@ type harness struct {
 	codex                *fakeCodex
 	codexErr             error
 	daemon               daemon.Status
+	exe                  string
+	method               update.Method
 	app                  *app
 }
 
@@ -55,6 +58,8 @@ func newHarness(t *testing.T) *harness {
 		codexHome: filepath.Join(root, "codex"),
 		stateHome: filepath.Join(root, "codexctl"),
 		codex:     &fakeCodex{},
+		exe:       filepath.Join(root, "bin", "codexctl"),
+		method:    update.MethodRelease,
 	}
 	h.app = &app{
 		openStore: func() (*store.Store, error) { return h.store(), nil },
@@ -63,6 +68,9 @@ func newHarness(t *testing.T) *harness {
 				return nil, h.codexErr
 			}
 			return h.codex, nil
+		},
+		executable: func() (string, update.Method, error) {
+			return h.exe, h.method, nil
 		},
 		interactive: true,
 	}

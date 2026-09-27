@@ -15,8 +15,9 @@ var errLockHeld = errors.New("lock is held")
 // The lock is an OS-level lock on the open lock file rather than the file's
 // existence, so it goes away with the process that holds it: a crash, kill or
 // Ctrl-C during an interactive `codex login` cannot leave a stale lock behind.
-// The file itself is never removed (removing it would let two processes lock
-// different files of the same name) and its contents are only informational.
+// The file itself is only removed by Purge (removing it would let two
+// processes lock different files of the same name) and its contents are only
+// informational.
 func (s *Store) lock() (func(), error) {
 	if err := refuseSymlink(s.StateHome); err != nil {
 		return nil, err

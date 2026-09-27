@@ -18,3 +18,6 @@ func (s *Store) profilesDir() string  { return filepath.Join(s.StateHome, "profi
 func (s *Store) profilePath(name string) string {
 	return filepath.Join(s.profilesDir(), name+".json")
 }
+
+// AuthPath is the active Codex credential file.
+func (s *Store) AuthPath() string { return s.authPath() }
