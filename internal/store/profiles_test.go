@@ -16,6 +16,7 @@ func TestImportSavesActiveLogin(t *testing.T) {
 	if _, err := s.Import("existing"); err != nil {
 		t.Fatal(err)
 	}
+
 	assertFile(t, s.profilePath("existing"), active)
 	assertFile(t, s.AuthPath(), active)
 	assertCurrent(t, s, "existing")
@@ -43,15 +44,18 @@ func TestImportRefusals(t *testing.T) {
 			writeBytes(t, s.AuthPath(), chatgptAuth(t, "acct-a", "r2"))
 		}, `already saved as profile "a"`},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newTestStore(t)
 			tt.setup(t, s)
+
 			before := s.selectedName()
 			_, err := s.Import("new")
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want it to mention %q", err, tt.want)
 			}
+
 			assertCurrent(t, s, before)
 		})
 	}
@@ -78,6 +82,7 @@ func TestLogoutSelectedProfile(t *testing.T) {
 	if !bytes.Equal(loggedOut, refreshed) {
 		t.Fatalf("codex logout got stale credentials:\n%s", loggedOut)
 	}
+
 	assertWarning(t, result, "signed out")
 	assertMissing(t, s.profilePath("a"))
 	assertMissing(t, s.currentPath())
@@ -87,10 +92,10 @@ func TestLogoutSelectedProfile(t *testing.T) {
 
 func TestLogoutOtherProfileKeepsActiveLogin(t *testing.T) {
 	s := newTestStore(t)
-	a := chatgptAuth(t, "acct-a", "r1")
-	b := chatgptAuth(t, "acct-b", "r1")
-	mustLogin(t, s, "a", a)
-	mustLogin(t, s, "b", b)
+	authA := chatgptAuth(t, "acct-a", "r1")
+	authB := chatgptAuth(t, "acct-b", "r1")
+	mustLogin(t, s, "a", authA)
+	mustLogin(t, s, "b", authB)
 
 	var loggedOut []byte
 	result, err := s.Logout("a", fakeLogout(t, &loggedOut, nil))
@@ -98,18 +103,19 @@ func TestLogoutOtherProfileKeepsActiveLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertWarning(t, result, "")
-	if !bytes.Equal(loggedOut, a) {
+	if !bytes.Equal(loggedOut, authA) {
 		t.Fatalf("codex logout got the wrong credentials:\n%s", loggedOut)
 	}
+
 	assertMissing(t, s.profilePath("a"))
-	assertFile(t, s.AuthPath(), b)
+	assertFile(t, s.AuthPath(), authB)
 	assertCurrent(t, s, "b")
 }
 
 func TestLogoutKeepsAuthJSONOfAnotherAccount(t *testing.T) {
 	s := newTestStore(t)
-	a := chatgptAuth(t, "acct-a", "r1")
-	mustLogin(t, s, "a", a)
+	authA := chatgptAuth(t, "acct-a", "r1")
+	mustLogin(t, s, "a", authA)
 	other := chatgptAuth(t, "acct-x", "r1")
 	writeBytes(t, s.AuthPath(), other)
 
@@ -119,9 +125,10 @@ func TestLogoutKeepsAuthJSONOfAnotherAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertWarning(t, result, "different account")
-	if !bytes.Equal(loggedOut, a) {
+	if !bytes.Equal(loggedOut, authA) {
 		t.Fatalf("codex logout got the wrong credentials:\n%s", loggedOut)
 	}
+
 	assertFile(t, s.AuthPath(), other)
 	assertMissing(t, s.profilePath("a"))
 	assertMissing(t, s.currentPath())
@@ -129,25 +136,28 @@ func TestLogoutKeepsAuthJSONOfAnotherAccount(t *testing.T) {
 
 func TestFailedLogoutKeepsProfile(t *testing.T) {
 	s := newTestStore(t)
-	a := chatgptAuth(t, "acct-a", "r1")
-	mustLogin(t, s, "a", a)
+	authA := chatgptAuth(t, "acct-a", "r1")
+	mustLogin(t, s, "a", authA)
 
 	var loggedOut []byte
 	if _, err := s.Logout("a", fakeLogout(t, &loggedOut, errors.New("network down"))); err == nil {
 		t.Fatal("logout succeeded")
 	}
-	assertFile(t, s.profilePath("a"), a)
-	assertFile(t, s.AuthPath(), a)
+
+	assertFile(t, s.profilePath("a"), authA)
+	assertFile(t, s.AuthPath(), authA)
 	assertCurrent(t, s, "a")
 	assertNoIsolatedHomes(t, s)
 }
 
 func TestLogoutMissingProfile(t *testing.T) {
 	s := newTestStore(t)
+
 	called := false
 	if _, err := s.Logout("missing", func(string) error { called = true; return nil }); err == nil {
 		t.Fatal("logout of a missing profile succeeded")
 	}
+
 	if called {
 		t.Fatal("codex logout ran for a missing profile")
 	}

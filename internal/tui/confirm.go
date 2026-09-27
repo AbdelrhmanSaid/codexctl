@@ -28,9 +28,11 @@ func newConfirm(t *Theme, opts ConfirmOptions) *confirmModel {
 	if opts.Affirmative == "" {
 		opts.Affirmative = "Yes"
 	}
+
 	if opts.Negative == "" {
 		opts.Negative = "No"
 	}
+
 	return &confirmModel{opts: opts, theme: t, yes: opts.Default}
 }
 
@@ -41,6 +43,7 @@ func (m *confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+
 	switch key.String() {
 	case "left", "right", "h", "l", "tab", "shift+tab":
 		m.yes = !m.yes
@@ -54,6 +57,7 @@ func (m *confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.yes = false
 		m.cancel()
 	}
+
 	if m.done {
 		return m, tea.Quit
 	}
@@ -66,31 +70,38 @@ func (m *confirmModel) View() string {
 		if m.cancelled {
 			return t.abandoned(m.opts.Title)
 		}
+
 		answer := m.opts.Negative
 		if m.yes {
 			answer = m.opts.Affirmative
 		}
+
 		return t.answered(m.opts.Title, answer)
 	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", t.question(m.opts.Title))
 	writeLines(&b, t.describe(m.opts.Description, m.width-2))
-	yes, no := t.Button, t.ButtonOn
+
+	yesStyle, noStyle := t.Button, t.ButtonOn
 	if m.yes {
-		yes, no = t.ButtonOn, t.Button
+		yesStyle, noStyle = t.ButtonOn, t.Button
 		if m.opts.Danger {
-			yes = t.Danger
+			yesStyle = t.Danger
 		}
 	}
-	fmt.Fprintf(&b, "\n  %s %s\n\n", yes.Render(m.opts.Affirmative), no.Render(m.opts.Negative))
+
+	fmt.Fprintf(&b, "\n  %s %s\n\n", yesStyle.Render(m.opts.Affirmative), noStyle.Render(m.opts.Negative))
 	writeLines(&b, t.help(m.width-2, "←/→", "switch", "y/n", "choose", "enter", "confirm", "esc", "cancel"))
+
 	return b.String()
 }
 
 func Confirm(env Env, opts ConfirmOptions) (bool, error) {
-	m := newConfirm(env.theme(), opts)
-	if err := ask(env, m); err != nil {
+	model := newConfirm(env.theme(), opts)
+	if err := ask(env, model); err != nil {
 		return false, err
 	}
-	return m.yes, nil
+
+	return model.yes, nil
 }

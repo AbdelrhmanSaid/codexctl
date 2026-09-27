@@ -29,6 +29,7 @@ func (r *Reporter) Context() context.Context {
 	if r.ctx == nil {
 		return context.Background()
 	}
+
 	return r.ctx
 }
 
@@ -37,6 +38,7 @@ func (r *Reporter) Progress(fraction float64) {
 	if r.send == nil {
 		return
 	}
+
 	r.send(progressMsg{r.index, max(0, min(fraction, 1))})
 }
 
@@ -44,6 +46,7 @@ func (r *Reporter) Result(text string) {
 	if r.send == nil {
 		return
 	}
+
 	r.send(resultMsg{r.index, text})
 }
 
@@ -91,7 +94,7 @@ type stepsModel struct {
 }
 
 func newSteps(t *Theme, steps []Step) *stepsModel {
-	m := &stepsModel{
+	model := &stepsModel{
 		theme:    t,
 		steps:    steps,
 		titles:   make([]string, len(steps)),
@@ -100,29 +103,34 @@ func newSteps(t *Theme, steps []Step) *stepsModel {
 		spinner:  spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(t.Accent)),
 		bar:      progress.New(progress.WithGradient("#7D6BF0", "#A594FF"), progress.WithWidth(28), progress.WithoutPercentage(), progress.WithColorProfile(t.r.ColorProfile())),
 	}
+
 	for i, step := range steps {
-		m.titles[i] = step.Title
-		m.progress[i] = -1
+		model.titles[i] = step.Title
+		model.progress[i] = -1
 	}
-	return m
+
+	return model
 }
 
 func (m *stepsModel) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, m.start(0))
 }
 
-func (m *stepsModel) start(i int) tea.Cmd {
-	if i >= len(m.steps) {
+func (m *stepsModel) start(index int) tea.Cmd {
+	if index >= len(m.steps) {
 		m.finished = true
 		return tea.Quit
 	}
-	m.current = i
-	m.states[i] = stepRunning
+
+	m.current = index
+	m.states[index] = stepRunning
 	m.started = time.Now()
-	step := m.steps[i]
-	reporter := &Reporter{index: i, send: m.send, ctx: m.ctx}
+
+	step := m.steps[index]
+	reporter := &Reporter{index: index, send: m.send, ctx: m.ctx}
+
 	return func() tea.Msg {
-		return stepDoneMsg{i, step.Run(reporter)}
+		return stepDoneMsg{index, step.Run(reporter)}
 	}
 }
 
@@ -152,21 +160,26 @@ func (m *stepsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.states[msg.index] = stepFailed
 				return m, tea.Quit
 			}
+
 			m.states[msg.index] = stepDone
 			if msg.index+1 == len(m.steps) {
 				m.cancelled = false
 				m.finished = true
 			}
+
 			return m, tea.Quit
 		}
+
 		if msg.err != nil {
 			m.states[msg.index] = stepFailed
 			m.err = msg.err
 			return m, tea.Quit
 		}
+
 		m.states[msg.index] = stepDone
 		return m, m.start(msg.index + 1)
 	}
+
 	return m, nil
 }
 
@@ -174,6 +187,7 @@ func (m *stepsModel) View() string {
 	if m.transient && m.finished {
 		return ""
 	}
+
 	t := m.theme
 	var b strings.Builder
 	for i, title := range m.titles {
@@ -186,14 +200,16 @@ func (m *stepsModel) View() string {
 			fmt.Fprintf(&b, "%s %s\n", t.Err.Render(glyphFail), title)
 		case stepRunning:
 			line := m.spinner.View() + " " + title
-			if p := m.progress[i]; p >= 0 {
-				line += "  " + m.bar.ViewAs(p) + " " + t.Muted.Render(fmt.Sprintf("%3.0f%%", p*100))
+			if fraction := m.progress[i]; fraction >= 0 {
+				line += "  " + m.bar.ViewAs(fraction) + " " + t.Muted.Render(fmt.Sprintf("%3.0f%%", fraction*100))
 			} else if elapsed := time.Since(m.started); elapsed > 3*time.Second {
 				line += " " + t.Muted.Render(fmt.Sprintf("%ds", int(elapsed.Seconds())))
 			}
+
 			fmt.Fprintf(&b, "%s\n", line)
 		}
 	}
+
 	return b.String()
 }
 
@@ -203,23 +219,28 @@ func RunSteps(env Env, steps ...Step) error {
 	return runSteps(env, newSteps(env.theme(), steps))
 }
 
-func runSteps(env Env, m *stepsModel) error {
-	m.ctx, m.cancel = context.WithCancel(context.Background())
-	defer m.cancel()
-	p := tea.NewProgram(m, tea.WithInput(env.In), tea.WithOutput(env.Out))
-	m.send = p.Send
-	if _, err := p.Run(); err != nil {
+func runSteps(env Env, model *stepsModel) error {
+	model.ctx, model.cancel = context.WithCancel(context.Background())
+	defer model.cancel()
+
+	program := tea.NewProgram(model, tea.WithInput(env.In), tea.WithOutput(env.Out))
+	model.send = program.Send
+
+	if _, err := program.Run(); err != nil {
 		return err
 	}
-	if m.cancelled {
+
+	if model.cancelled {
 		return ErrCancelled
 	}
-	return m.err
+
+	return model.err
 }
 
 // Spin clears its line on success, since the caller reports the result.
 func Spin(env Env, title string, run func() error) error {
-	m := newSteps(env.theme(), []Step{{Title: title, Run: func(*Reporter) error { return run() }}})
-	m.transient = true
-	return runSteps(env, m)
+	model := newSteps(env.theme(), []Step{{Title: title, Run: func(*Reporter) error { return run() }}})
+	model.transient = true
+
+	return runSteps(env, model)
 }

@@ -33,6 +33,7 @@ func readAuth(path string) (authInfo, error) {
 	if err != nil {
 		return authInfo{}, err
 	}
+
 	return parseAuth(data)
 }
 
@@ -41,30 +42,34 @@ func parseAuth(data []byte) (authInfo, error) {
 	if len(bytes.TrimSpace(data)) == 0 || json.Unmarshal(data, &info) != nil {
 		return info, errors.New("credential file is not valid JSON")
 	}
+
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(data, &object); err != nil || object == nil {
 		return info, errors.New("credential file must be a JSON object")
 	}
+
 	return info, nil
 }
 
 func (a authInfo) identity() Identity {
-	id := Identity{AuthMode: a.AuthMode, AccountID: a.Tokens.AccountID, LastRefresh: a.LastRefresh}
-	if id.AuthMode == "" {
+	identity := Identity{AuthMode: a.AuthMode, AccountID: a.Tokens.AccountID, LastRefresh: a.LastRefresh}
+	if identity.AuthMode == "" {
 		switch {
 		case a.Tokens.IDToken != "" || a.Tokens.AccountID != "":
-			id.AuthMode = "chatgpt"
+			identity.AuthMode = "chatgpt"
 		case a.APIKey != "":
-			id.AuthMode = "apikey"
+			identity.AuthMode = "apikey"
 		}
 	}
+
 	claims := idTokenClaims(a.Tokens.IDToken)
-	id.Email = claims.Email
-	id.Plan = claims.Auth.PlanType
-	if id.AccountID == "" {
-		id.AccountID = claims.Auth.AccountID
+	identity.Email = claims.Email
+	identity.Plan = claims.Auth.PlanType
+	if identity.AccountID == "" {
+		identity.AccountID = claims.Auth.AccountID
 	}
-	return id
+
+	return identity
 }
 
 type idClaims struct {
@@ -78,14 +83,17 @@ type idClaims struct {
 // Decoded without verifying; the claims are only used for display.
 func idTokenClaims(token string) idClaims {
 	var claims idClaims
+
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return claims
 	}
+
 	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
 	if err != nil {
 		return claims
 	}
+
 	_ = json.Unmarshal(payload, &claims)
 	return claims
 }
@@ -102,22 +110,27 @@ const (
 // Account IDs decide when both files have one; otherwise only identical files
 // match.
 func compareAccounts(active, saved []byte) (accountMatch, error) {
-	a, err := parseAuth(active)
+	activeInfo, err := parseAuth(active)
 	if err != nil {
 		return accountUnverified, err
 	}
-	b, err := parseAuth(saved)
+
+	savedInfo, err := parseAuth(saved)
 	if err != nil {
 		return accountUnverified, err
 	}
-	if a.Tokens.AccountID != "" && b.Tokens.AccountID != "" {
-		if a.Tokens.AccountID == b.Tokens.AccountID {
+
+	activeAccount, savedAccount := activeInfo.Tokens.AccountID, savedInfo.Tokens.AccountID
+	if activeAccount != "" && savedAccount != "" {
+		if activeAccount == savedAccount {
 			return accountSame, nil
 		}
 		return accountDifferent, nil
 	}
+
 	if bytes.Equal(active, saved) {
 		return accountSame, nil
 	}
+
 	return accountUnverified, nil
 }

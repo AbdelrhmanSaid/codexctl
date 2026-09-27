@@ -11,14 +11,16 @@ import (
 
 // No OS-level lock here: a crashed process leaves the file behind.
 func lockFile(path string) (func(), error) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return nil, fmt.Errorf("another codexctl operation is running (remove %s only if it is stale)", path)
 		}
 		return nil, err
 	}
-	recordHolder(f)
-	f.Close()
+
+	recordHolder(file)
+	file.Close()
+
 	return func() { _ = os.Remove(path) }, nil
 }

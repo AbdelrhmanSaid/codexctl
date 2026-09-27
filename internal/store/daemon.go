@@ -28,10 +28,12 @@ type DaemonState struct {
 // Only feeds diagnostics, so a failed write does not fail the switch.
 func (op *operation) recordSwitch(profile string) {
 	op.result.AuthChanged = true
+
 	data, err := json.Marshal(switchRecord{CodexHome: op.CodexHome, Profile: profile, Time: time.Now()})
 	if err != nil {
 		return
 	}
+
 	_ = writeFile(op.switchedPath(), append(data, '\n'), 0o600)
 }
 
@@ -40,14 +42,17 @@ func (s *Store) lastSwitch() (switchRecord, bool) {
 	if err != nil {
 		return switchRecord{}, false
 	}
+
 	var record switchRecord
 	if json.Unmarshal(data, &record) != nil || record.Time.IsZero() {
 		return switchRecord{}, false
 	}
+
 	// The state directory is shared by every CODEX_HOME.
 	if filepath.Clean(record.CodexHome) != filepath.Clean(s.CodexHome) {
 		return switchRecord{}, false
 	}
+
 	return record, true
 }
 
@@ -56,16 +61,19 @@ func (s *Store) Daemon() DaemonState {
 	if detect == nil {
 		detect = daemon.Detect
 	}
+
 	state := DaemonState{Status: detect(s.CodexHome)}
 	if state.State != daemon.Running {
 		return state
 	}
+
 	// An unknown start time counts as stale: a needless restart beats the
 	// wrong account.
 	if record, ok := s.lastSwitch(); ok && (state.StartedAt.IsZero() || state.StartedAt.Before(record.Time)) {
 		state.Stale = true
 		state.Profile = record.Profile
 	}
+
 	return state
 }
 
@@ -81,6 +89,7 @@ func (s *Store) daemonCheck() Check {
 		if state.Profile == "" {
 			account = "a signed-out auth.json"
 		}
+
 		return Check{fmt.Sprintf("Codex app-server daemon (pid %d) started before codexctl switched to %s and still uses the previous credentials; run 'codexctl restart-daemon' to reload it (this interrupts active Codex sessions)", state.PID, account), true}
 	default:
 		return Check{fmt.Sprintf("Codex app-server daemon (pid %d) started after the last account switch", state.PID), false}

@@ -15,6 +15,7 @@ import (
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	root := t.TempDir()
+
 	return &Store{
 		CodexHome: filepath.Join(root, "codex"),
 		StateHome: filepath.Join(root, "codexctl"),
@@ -42,12 +43,13 @@ func apiKeyAuth(t *testing.T, key string) []byte {
 	return marshalAuth(t, map[string]any{"OPENAI_API_KEY": key})
 }
 
-func marshalAuth(t *testing.T, v any) []byte {
+func marshalAuth(t *testing.T, value any) []byte {
 	t.Helper()
-	data, err := json.MarshalIndent(v, "", "  ")
+	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return data
 }
 
@@ -63,8 +65,9 @@ func fakeIDToken(t *testing.T, email, plan, account string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enc := base64.RawURLEncoding.EncodeToString
-	return enc([]byte(`{"alg":"none"}`)) + "." + enc(claims) + ".sig"
+
+	encode := base64.RawURLEncoding.EncodeToString
+	return encode([]byte(`{"alg":"none"}`)) + "." + encode(claims) + ".sig"
 }
 
 func fakeLogin(data []byte) func(string) error {
@@ -86,6 +89,7 @@ func readBytes(t *testing.T, path string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return data
 }
 
@@ -94,6 +98,7 @@ func writeBytes(t *testing.T, path string, data []byte) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +131,7 @@ func assertWarning(t *testing.T, result Result, want string) {
 	if want == "" && warning != "" {
 		t.Fatalf("unexpected warning: %s", warning)
 	}
+
 	if !strings.Contains(warning, want) {
 		t.Fatalf("warning %q does not mention %q", warning, want)
 	}
@@ -137,6 +143,7 @@ func assertNoIsolatedHomes(t *testing.T, s *Store) {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
 	}
+
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), loginDirPrefix) {
 			t.Fatalf("isolated home %s was left behind", entry.Name())

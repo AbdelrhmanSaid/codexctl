@@ -18,6 +18,7 @@ import (
 func (a *app) runDashboard(cmd *cobra.Command) error {
 	screen := tui.OpenScreen(env(cmd))
 	defer screen.Close()
+
 	a.dashboard = true
 	defer func() { a.dashboard = false }()
 
@@ -26,17 +27,21 @@ func (a *app) runDashboard(cmd *cobra.Command) error {
 	var check *usageCheck
 	// The check saves refreshed credentials, so it must not be abandoned.
 	defer func() { a.awaitUsage(cmd, check) }()
+
 	for {
-		s, err := a.openStore()
+		profileStore, err := a.openStore()
 		if err != nil {
 			return err
 		}
-		profiles, err := s.Profiles()
+
+		profiles, err := profileStore.Profiles()
 		if err != nil {
 			return err
 		}
-		check = a.startUsageCheck(cmd, s, profiles, usage)
-		opts := dashboardOptions(s, dashboardRows(profiles, usage, check))
+
+		check = a.startUsageCheck(cmd, profileStore, profiles, usage)
+		opts := dashboardOptions(profileStore, dashboardRows(profiles, usage, check))
+
 		if check != nil {
 			pending, known := check, maps.Clone(usage)
 			opts.Load = func() []tui.DashboardRow {
@@ -44,36 +49,43 @@ func (a *app) runDashboard(cmd *cobra.Command) error {
 				return dashboardRows(profiles, withUsage(known, pending), nil)
 			}
 		}
+
 		opts.Results = a.results
 		// Follow the focused profile if the list changed around it.
 		opts.Cursor = cursor
-		for i, p := range profiles {
-			if p.Name == focused {
+		for i, profile := range profiles {
+			if profile.Name == focused {
 				opts.Cursor = i
 			}
 		}
+
 		choice, err := screen.Dashboard(opts)
 		if err != nil || choice.Key == "" {
 			return err
 		}
+
 		cursor, focused = choice.Row, ""
 		if cursor < len(profiles) {
 			focused = profiles[cursor].Name
 		}
+
 		a.results = nil
 		if check != nil {
 			a.awaitUsage(cmd, check)
 			a.mergeUsage(usage, check)
 			check = nil
 		}
+
 		if choice.Key == "f" {
 			clear(usage)
 			continue
 		}
+
 		args, err := a.dashboardArgs(cmd, choice, profiles)
 		if err == nil {
 			err = a.runSubcommand(cmd, args)
 		}
+
 		if err != nil && !errors.Is(err, tui.ErrCancelled) && !errors.Is(err, ErrReported) {
 			a.record(tui.LevelFail, capitalize(err.Error()))
 		}
@@ -85,6 +97,7 @@ func (a *app) dashboardArgs(cmd *cobra.Command, choice tui.DashboardChoice, prof
 	if choice.Row < len(profiles) {
 		name = profiles[choice.Row].Name
 	}
+
 	switch choice.Key {
 	case "u":
 		return []string{"use", name}, nil
@@ -113,18 +126,21 @@ func (a *app) dashboardArgs(cmd *cobra.Command, choice tui.DashboardChoice, prof
 	case "U":
 		return []string{"update"}, nil
 	}
+
 	return nil, fmt.Errorf("unknown dashboard action %q", choice.Key)
 }
 
 func (a *app) runSubcommand(cmd *cobra.Command, args []string) error {
 	root := a.newRootCommand(cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 	root.SetArgs(args)
+
 	return root.ExecuteContext(cmd.Context())
 }
 
-func dashboardOptions(s *store.Store, rows []tui.DashboardRow) tui.DashboardOptions {
+func dashboardOptions(profileStore *store.Store, rows []tui.DashboardRow) tui.DashboardOptions {
 	opts := tui.DashboardOptions{Title: "codexctl", Subtitle: buildVersion(), Rows: rows}
-	current, matches, err := s.Current()
+
+	current, matches, err := profileStore.Current()
 	switch {
 	case err != nil:
 		opts.Notes = append(opts.Notes, tui.Note{Text: "Cannot read the selected profile: " + err.Error(), Level: tui.LevelWarn})
@@ -134,7 +150,7 @@ func dashboardOptions(s *store.Store, rows []tui.DashboardRow) tui.DashboardOpti
 		opts.Notes = append(opts.Notes, tui.Note{Text: "The active auth.json no longer matches profile " + current + ".", Level: tui.LevelWarn})
 	}
 
-	state := s.Daemon()
+	state := profileStore.Daemon()
 	restart := false
 	switch {
 	case state.Stale:
@@ -155,57 +171,67 @@ func dashboardOptions(s *store.Store, rows []tui.DashboardRow) tui.DashboardOpti
 		{Key: "n", Label: "log in"},
 		{Key: "i", Label: "import"},
 	}
+
 	if restart {
 		opts.Actions = append(opts.Actions, tui.Action{Key: "R", Label: "restart daemon"})
 	}
+
 	opts.Actions = append(opts.Actions,
 		tui.Action{Key: "f", Label: "refresh usage"},
 		tui.Action{Key: "D", Label: "doctor"},
 		tui.Action{Key: "U", Label: "update"})
+
 	return opts
 }
 
 func dashboardRows(profiles []store.Profile, usage map[string]usageResult, check *usageCheck) []tui.DashboardRow {
 	rows := make([]tui.DashboardRow, len(profiles))
-	for i, p := range profiles {
-		row := tui.DashboardRow{Name: p.Name, Detail: profileDetail(p), Active: p.Selected, Invalid: !p.Valid}
-		if p.Valid {
-			row.Extra = profileExtra(p)
+	for i, profile := range profiles {
+		row := tui.DashboardRow{Name: profile.Name, Detail: profileDetail(profile), Active: profile.Selected, Invalid: !profile.Valid}
+		if profile.Valid {
+			row.Extra = profileExtra(profile)
 		}
-		r, ok := usage[p.Name]
+
+		profileUsage, ok := usage[profile.Name]
 		switch {
-		case !ok && check != nil && check.covers(p.Name):
+		case !ok && check != nil && check.covers(profile.Name):
 			row.Status = "checking usage…"
-		case r.Usage != nil:
+		case profileUsage.Usage != nil:
 			var resets []string
-			for _, w := range []*codex.Window{r.Usage.Primary, r.Usage.Secondary} {
-				if w == nil {
+			for _, window := range []*codex.Window{profileUsage.Usage.Primary, profileUsage.Usage.Secondary} {
+				if window == nil {
 					continue
 				}
-				name := strings.ToLower(windowName(w, "limit"))
-				row.Meters = append(row.Meters, tui.Meter{Label: name, Left: left(w)})
-				if in := resetsIn(w); in != "" {
-					resets = append(resets, name+" resets "+in)
+
+				name := strings.ToLower(windowName(window, "limit"))
+				row.Meters = append(row.Meters, tui.Meter{Label: name, Left: left(window)})
+				if remaining := resetsIn(window); remaining != "" {
+					resets = append(resets, name+" resets "+remaining)
 				}
 			}
+
 			row.Extra = append(resets, row.Extra...)
-		case r.failed():
+		case profileUsage.failed():
 			row.Status = "usage unavailable"
-			row.Extra = []string{"Usage unavailable: " + r.Err.Error()}
+			row.Extra = []string{"Usage unavailable: " + profileUsage.Err.Error()}
 		}
+
 		rows[i] = row
 	}
+
 	return rows
 }
 
-func profileExtra(p store.Profile) []string {
+func profileExtra(profile store.Profile) []string {
 	var parts []string
-	if p.AccountID != "" {
-		parts = append(parts, "Account "+p.AccountID)
+	if profile.AccountID != "" {
+		parts = append(parts, "Account "+profile.AccountID)
 	}
-	if p.LastRefresh != "" {
-		parts = append(parts, "refreshed "+relativeTime(p.LastRefresh))
+
+	if profile.LastRefresh != "" {
+		parts = append(parts, "refreshed "+relativeTime(profile.LastRefresh))
 	}
+
 	return parts
 }
 
@@ -230,28 +256,33 @@ func (c *usageCheck) finished() bool {
 }
 
 // Checks the profiles without a result, which is all of them after a refresh.
-func (a *app) startUsageCheck(cmd *cobra.Command, s *store.Store, profiles []store.Profile, usage map[string]usageResult) *usageCheck {
+func (a *app) startUsageCheck(cmd *cobra.Command, profileStore *store.Store, profiles []store.Profile, usage map[string]usageResult) *usageCheck {
 	var names []string
-	for _, p := range profiles {
-		if _, ok := usage[p.Name]; !ok && p.Valid {
-			names = append(names, p.Name)
+	for _, profile := range profiles {
+		if _, ok := usage[profile.Name]; !ok && profile.Valid {
+			names = append(names, profile.Name)
 		}
 	}
+
 	if len(names) == 0 {
 		return nil
 	}
-	c, err := a.findCodex()
+
+	codexClient, err := a.findCodex()
 	if err != nil {
 		for _, name := range names {
 			usage[name] = usageResult{Err: err}
 		}
+
 		return nil
 	}
+
 	check := &usageCheck{names: names, done: make(chan struct{})}
 	go func() {
 		defer close(check.done)
-		check.results, check.result, check.err = fetchUsage(cmd.Context(), s, c, names)
+		check.results, check.result, check.err = fetchUsage(cmd.Context(), profileStore, codexClient, names)
 	}()
+
 	return check
 }
 
@@ -259,6 +290,7 @@ func (a *app) awaitUsage(cmd *cobra.Command, check *usageCheck) {
 	if check == nil || check.finished() {
 		return
 	}
+
 	_ = a.busy(cmd, "Finishing the usage check", func() error {
 		<-check.done
 		return nil
@@ -267,6 +299,7 @@ func (a *app) awaitUsage(cmd *cobra.Command, check *usageCheck) {
 
 func (a *app) mergeUsage(usage map[string]usageResult, check *usageCheck) {
 	withUsage(usage, check)
+
 	for _, warning := range check.result.Warnings {
 		a.record(tui.LevelWarn, capitalize(warning))
 	}
@@ -281,5 +314,6 @@ func withUsage(usage map[string]usageResult, check *usageCheck) map[string]usage
 			usage[name] = check.results[name]
 		}
 	}
+
 	return usage
 }

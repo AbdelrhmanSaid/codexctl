@@ -23,10 +23,12 @@ func buildVersion() string {
 	if version != "dev" {
 		return version
 	}
+
 	info, ok := debug.ReadBuildInfo()
 	if !ok || info.Main.Version == "" || info.Main.Version == "(devel)" {
 		return version
 	}
+
 	return strings.TrimPrefix(info.Main.Version, "v")
 }
 
@@ -59,17 +61,21 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	a := &app{
 		openStore: store.NewFromEnvironment,
 		findCodex: func() (codexCLI, error) {
-			c, err := codex.Find()
+			codexClient, err := codex.Find()
 			if err != nil {
 				return nil, err
 			}
-			return c, nil
+
+			return codexClient, nil
 		},
 		executable: findExecutable,
 	}
+
 	a.detectTerminals(stdin, stdout, stderr)
+
 	root := a.newRootCommand(stdin, stdout, stderr)
 	root.SetArgs(args)
+
 	return root.Execute()
 }
 
@@ -81,16 +87,20 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
+
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
 		if !a.tui {
 			return cmd.Help()
 		}
+
 		return a.runDashboard(cmd)
 	}
+
 	root.SetIn(stdin)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetHelpCommand(&cobra.Command{Hidden: true})
+
 	root.AddCommand(
 		a.newLoginCommand(),
 		a.newImportCommand(),
@@ -109,33 +119,37 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 		a.newUninstallCommand(),
 		newCompletionCommand(root),
 	)
+
 	return root
 }
 
-func (a *app) withStore(run func(cmd *cobra.Command, s *store.Store, args []string) error) func(*cobra.Command, []string) error {
+func (a *app) withStore(run func(cmd *cobra.Command, profileStore *store.Store, args []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		s, err := a.openStore()
+		profileStore, err := a.openStore()
 		if err != nil {
 			return err
 		}
-		return run(cmd, s, args)
+
+		return run(cmd, profileStore, args)
 	}
 }
 
 func (a *app) newLoginCommand() *cobra.Command {
 	var opts codex.LoginOptions
+
 	cmd := &cobra.Command{
 		Use:               "login [PROFILE_NAME]",
 		Short:             "Log in and save a named profile",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: cobra.NoFileCompletions,
-		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, args []string) error {
+		RunE: a.withStore(func(cmd *cobra.Command, profileStore *store.Store, args []string) error {
 			// Fail on a missing codex before any state is created.
-			c, err := a.findCodex()
+			codexClient, err := a.findCodex()
 			if err != nil {
 				return err
 			}
-			name, err := a.newNameArg(cmd, s, args, 0, "PROFILE_NAME", tui.InputOptions{
+
+			name, err := a.newNameArg(cmd, profileStore, args, 0, "PROFILE_NAME", tui.InputOptions{
 				Title:       "Name for this login",
 				Description: []string{"Letters, digits, '.', '_' and '-'. Reusing a name logs that profile in again."},
 				Placeholder: "work",
@@ -143,24 +157,30 @@ func (a *app) newLoginCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
 			secret := ""
 			if a.tui && !opts.DeviceAuth && !opts.APIKey && !opts.AccessToken {
 				if opts, secret, err = a.chooseLoginMethod(cmd); err != nil {
 					return err
 				}
 			}
-			result, err := a.runLogin(cmd, s, c, name, opts, secret)
+
+			result, err := a.runLogin(cmd, profileStore, codexClient, name, opts, secret)
 			if err != nil {
 				return err
 			}
-			a.finish(cmd, s, result, say("Saved and activated profile %s", profileName(result.Profile)).withHint(restartClients))
+
+			a.finish(cmd, profileStore, result, say("Saved and activated profile %s", profileName(result.Profile)).withHint(restartClients))
+
 			return nil
 		}),
 	}
+
 	cmd.Flags().BoolVar(&opts.DeviceAuth, "device-auth", false, "use Codex device authentication")
 	cmd.Flags().BoolVar(&opts.APIKey, "with-api-key", false, "read an API key from stdin")
 	cmd.Flags().BoolVar(&opts.AccessToken, "with-access-token", false, "read an access token from stdin")
 	cmd.MarkFlagsMutuallyExclusive("device-auth", "with-api-key", "with-access-token")
+
 	return cmd
 }
 
@@ -171,19 +191,22 @@ func (a *app) newImportCommand() *cobra.Command {
 		Long:              "Save the credentials Codex is currently using as a named profile and select it.\nUse this for an account that was logged in with plain 'codex login'.",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: cobra.NoFileCompletions,
-		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, args []string) error {
-			name, err := a.newNameArg(cmd, s, args, 0, "PROFILE_NAME", tui.InputOptions{
+		RunE: a.withStore(func(cmd *cobra.Command, profileStore *store.Store, args []string) error {
+			name, err := a.newNameArg(cmd, profileStore, args, 0, "PROFILE_NAME", tui.InputOptions{
 				Title:       "Name for the current Codex login",
 				Placeholder: "personal",
 			}, false)
 			if err != nil {
 				return err
 			}
-			result, err := s.Import(name)
+
+			result, err := profileStore.Import(name)
 			if err != nil {
 				return err
 			}
-			a.finish(cmd, s, result, say("Imported the active login as profile %s", profileName(result.Profile)))
+
+			a.finish(cmd, profileStore, result, say("Imported the active login as profile %s", profileName(result.Profile)))
+
 			return nil
 		}),
 	}
@@ -195,16 +218,19 @@ func (a *app) newUseCommand() *cobra.Command {
 		Short:             "Activate a saved profile",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: a.completeProfiles,
-		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, args []string) error {
-			name, err := a.profileArg(cmd, s, args, "Switch to which profile?", false)
+		RunE: a.withStore(func(cmd *cobra.Command, profileStore *store.Store, args []string) error {
+			name, err := a.profileArg(cmd, profileStore, args, "Switch to which profile?", false)
 			if err != nil {
 				return err
 			}
-			result, err := s.Use(name)
+
+			result, err := profileStore.Use(name)
 			if err != nil {
 				return err
 			}
-			a.finish(cmd, s, result, say("Now using profile %s", profileName(result.Profile)).withHint(restartClients))
+
+			a.finish(cmd, profileStore, result, say("Now using profile %s", profileName(result.Profile)).withHint(restartClients))
+
 			return nil
 		}),
 	}
@@ -212,21 +238,25 @@ func (a *app) newUseCommand() *cobra.Command {
 
 func (a *app) newListCommand() *cobra.Command {
 	var verbose, asJSON bool
+
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List saved profiles",
 		Args:    cobra.NoArgs,
-		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, _ []string) error {
-			profiles, err := s.Profiles()
+		RunE: a.withStore(func(cmd *cobra.Command, profileStore *store.Store, _ []string) error {
+			profiles, err := profileStore.Profiles()
 			if err != nil {
 				return err
 			}
+
 			return a.renderProfiles(cmd, profiles, verbose, asJSON)
 		}),
 	}
+
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show account details")
 	addJSONFlag(cmd, &asJSON)
+
 	return cmd
 }
 
@@ -236,18 +266,22 @@ func (a *app) newCurrentCommand() *cobra.Command {
 		Use:   "current",
 		Short: "Print the selected profile",
 		Args:  cobra.NoArgs,
-		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, _ []string) error {
-			current, matches, err := s.Current()
+		RunE: a.withStore(func(cmd *cobra.Command, profileStore *store.Store, _ []string) error {
+			current, matches, err := profileStore.Current()
 			if err != nil {
 				return err
 			}
+
 			if current == "" {
 				return errors.New("no profile has been selected")
 			}
-			return a.renderCurrent(cmd, s, current, matches, s.Daemon(), asJSON)
+
+			return a.renderCurrent(cmd, profileStore, current, matches, profileStore.Daemon(), asJSON)
 		}),
 	}
+
 	addJSONFlag(cmd, &asJSON)
+
 	return cmd
 }
 
@@ -258,19 +292,23 @@ func (a *app) newShowCommand() *cobra.Command {
 		Short:             "Show a profile's account details",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: a.completeProfiles,
-		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, args []string) error {
-			name, err := a.profileArg(cmd, s, args, "Show which profile?", true)
+		RunE: a.withStore(func(cmd *cobra.Command, profileStore *store.Store, args []string) error {
+			name, err := a.profileArg(cmd, profileStore, args, "Show which profile?", true)
 			if err != nil {
 				return err
 			}
-			p, err := s.Show(name)
+
+			profile, err := profileStore.Show(name)
 			if err != nil {
 				return err
 			}
-			return a.renderProfile(cmd, p, asJSON)
+
+			return a.renderProfile(cmd, profile, asJSON)
 		}),
 	}
+
 	addJSONFlag(cmd, &asJSON)
+
 	return cmd
 }
 
@@ -279,12 +317,14 @@ func (a *app) newSyncCommand() *cobra.Command {
 		Use:   "sync",
 		Short: "Save refreshed credentials into the selected profile",
 		Args:  cobra.NoArgs,
-		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, _ []string) error {
-			result, err := s.Sync()
+		RunE: a.withStore(func(cmd *cobra.Command, profileStore *store.Store, _ []string) error {
+			result, err := profileStore.Sync()
 			if err != nil {
 				return err
 			}
-			a.finish(cmd, s, result, say("Saved the active credentials into profile %s", profileName(result.Profile)))
+
+			a.finish(cmd, profileStore, result, say("Saved the active credentials into profile %s", profileName(result.Profile)))
+
 			return nil
 		}),
 	}
@@ -296,23 +336,27 @@ func (a *app) newRenameCommand() *cobra.Command {
 		Short:             "Rename a saved profile",
 		Args:              cobra.MaximumNArgs(2),
 		ValidArgsFunction: a.completeProfiles,
-		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, args []string) error {
-			oldName, err := a.profileArg(cmd, s, args, "Rename which profile?", true)
+		RunE: a.withStore(func(cmd *cobra.Command, profileStore *store.Store, args []string) error {
+			oldName, err := a.profileArg(cmd, profileStore, args, "Rename which profile?", true)
 			if err != nil {
 				return err
 			}
-			newName, err := a.newNameArg(cmd, s, args, 1, "NEW_NAME", tui.InputOptions{
+
+			newName, err := a.newNameArg(cmd, profileStore, args, 1, "NEW_NAME", tui.InputOptions{
 				Title:       fmt.Sprintf("New name for %s", oldName),
 				Placeholder: oldName,
 			}, false)
 			if err != nil {
 				return err
 			}
-			result, err := s.Rename(oldName, newName)
+
+			result, err := profileStore.Rename(oldName, newName)
 			if err != nil {
 				return err
 			}
-			a.finish(cmd, s, result, say("Renamed profile %s to %s", profileName(oldName), profileName(result.Profile)))
+
+			a.finish(cmd, profileStore, result, say("Renamed profile %s to %s", profileName(oldName), profileName(result.Profile)))
+
 			return nil
 		}),
 	}
@@ -325,11 +369,12 @@ func (a *app) newRemoveCommand() *cobra.Command {
 		Short:             "Delete saved profiles",
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: a.completeProfiles,
-		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, args []string) error {
-			names, err := a.profileArgs(cmd, s, args, "Remove which profiles?")
+		RunE: a.withStore(func(cmd *cobra.Command, profileStore *store.Store, args []string) error {
+			names, err := a.profileArgs(cmd, profileStore, args, "Remove which profiles?")
 			if err != nil {
 				return err
 			}
+
 			// Names checked in a list get a second look; typed ones are
 			// deliberate.
 			if len(args) == 0 {
@@ -339,16 +384,20 @@ func (a *app) newRemoveCommand() *cobra.Command {
 					return err
 				}
 			}
+
 			authChanged := false
 			for _, name := range names {
-				result, err := s.Remove(name)
+				result, err := profileStore.Remove(name)
 				if err != nil {
 					return err
 				}
+
 				authChanged = authChanged || result.AuthChanged
 				a.report(cmd, result, say("Removed profile %s", profileName(result.Profile)))
 			}
-			a.offerDaemonRestart(cmd, s, authChanged)
+
+			a.offerDaemonRestart(cmd, profileStore, authChanged)
+
 			return nil
 		}),
 	}
@@ -361,26 +410,31 @@ func (a *app) newLogoutCommand() *cobra.Command {
 		Long:              "Run 'codex logout' for the profile's account in an isolated directory, then delete the profile.\nUnlike 'remove', this ends the session itself.",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: a.completeProfiles,
-		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, args []string) error {
-			c, err := a.findCodex()
+		RunE: a.withStore(func(cmd *cobra.Command, profileStore *store.Store, args []string) error {
+			codexClient, err := a.findCodex()
 			if err != nil {
 				return err
 			}
-			name, err := a.profileArg(cmd, s, args, "Log out of which profile?", false)
+
+			name, err := a.profileArg(cmd, profileStore, args, "Log out of which profile?", false)
 			if err != nil {
 				return err
 			}
+
 			if len(args) == 0 {
 				if err := confirmDanger(cmd, fmt.Sprintf("Log out of %s?", name), "Log out",
 					"This ends the account's session and deletes the profile."); err != nil {
 					return err
 				}
 			}
-			result, err := a.runLogout(cmd, s, c, name)
+
+			result, err := a.runLogout(cmd, profileStore, codexClient, name)
 			if err != nil {
 				return err
 			}
-			a.finish(cmd, s, result, say("Logged out and removed profile %s", profileName(result.Profile)))
+
+			a.finish(cmd, profileStore, result, say("Logged out and removed profile %s", profileName(result.Profile)))
+
 			return nil
 		}),
 	}
@@ -392,18 +446,21 @@ func (a *app) newDoctorCommand() *cobra.Command {
 		Use:   "doctor",
 		Short: "Check configuration and profile state",
 		Args:  cobra.NoArgs,
-		RunE: a.withStore(func(cmd *cobra.Command, s *store.Store, _ []string) error {
+		RunE: a.withStore(func(cmd *cobra.Command, profileStore *store.Store, _ []string) error {
 			var checks []store.Check
 			if err := a.busy(cmd, "Checking configuration and profiles", func() error {
-				checks = s.Doctor()
+				checks = profileStore.Doctor()
 				return nil
 			}); err != nil {
 				return err
 			}
+
 			return a.renderChecks(cmd, checks, asJSON)
 		}),
 	}
+
 	addJSONFlag(cmd, &asJSON)
+
 	return cmd
 }
 
@@ -434,17 +491,20 @@ func (a *app) completeProfiles(_ *cobra.Command, args []string, _ string) ([]str
 	if len(args) != 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	s, err := a.openStore()
+
+	profileStore, err := a.openStore()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	names, _, err := s.List()
+
+	names, _, err := profileStore.List()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
+
 	return names, cobra.ShellCompDirectiveNoFileComp
 }
 
-func addJSONFlag(cmd *cobra.Command, v *bool) {
-	cmd.Flags().BoolVar(v, "json", false, "print machine-readable JSON")
+func addJSONFlag(cmd *cobra.Command, asJSON *bool) {
+	cmd.Flags().BoolVar(asJSON, "json", false, "print machine-readable JSON")
 }

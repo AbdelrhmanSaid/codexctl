@@ -17,25 +17,30 @@ func (s *Store) Purge(before func() error) error {
 		}
 		return nil
 	}
+
 	release, err := s.lock()
 	if err != nil {
 		return err
 	}
+
 	released := false
 	defer func() {
 		if !released {
 			release()
 		}
 	}()
+
 	if before != nil {
 		if err := before(); err != nil {
 			return err
 		}
 	}
+
 	entries, err := os.ReadDir(s.StateHome)
 	if err != nil {
 		return err
 	}
+
 	lockName := filepath.Base(s.lockPath())
 	for _, entry := range entries {
 		if entry.Name() == lockName {
@@ -45,12 +50,15 @@ func (s *Store) Purge(before func() error) error {
 			return fmt.Errorf("remove codexctl state: %w", err)
 		}
 	}
+
 	// The lock file goes last, once released: Windows cannot delete an open
 	// file.
 	release()
 	released = true
+
 	if err := os.RemoveAll(s.StateHome); err != nil {
 		return fmt.Errorf("remove codexctl state: %w", err)
 	}
+
 	return nil
 }

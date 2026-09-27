@@ -12,10 +12,12 @@ import (
 func TestLoginSavesAndActivates(t *testing.T) {
 	s := newTestStore(t)
 	data := chatgptAuth(t, "acct-a", "r1")
+
 	result, err := s.Login("a", fakeLogin(data))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	assertWarning(t, result, "")
 	assertFile(t, s.profilePath("a"), data)
 	assertFile(t, s.AuthPath(), data)
@@ -33,9 +35,11 @@ func TestLoginRunsInIsolatedHome(t *testing.T) {
 		if filepath.Clean(home) == filepath.Clean(s.CodexHome) {
 			t.Fatal("login ran in the real Codex home")
 		}
+
 		if !rootCredentialStoreIsFile(readBytes(t, filepath.Join(home, "config.toml"))) {
 			t.Fatal("isolated home is not configured for file-backed credentials")
 		}
+
 		return fakeLogin(chatgptAuth(t, "acct-a", "r1"))(home)
 	})
 	if err != nil {
@@ -53,17 +57,19 @@ func TestFailedLoginLeavesStateUntouched(t *testing.T) {
 		{"invalid auth.json", fakeLogin([]byte("not json"))},
 		{"auth.json is not an object", fakeLogin([]byte("[]"))},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newTestStore(t)
-			a := chatgptAuth(t, "acct-a", "r1")
-			mustLogin(t, s, "a", a)
+			authA := chatgptAuth(t, "acct-a", "r1")
+			mustLogin(t, s, "a", authA)
 
 			if _, err := s.Login("b", tt.login); err == nil {
 				t.Fatal("login succeeded")
 			}
-			assertFile(t, s.AuthPath(), a)
-			assertFile(t, s.profilePath("a"), a)
+
+			assertFile(t, s.AuthPath(), authA)
+			assertFile(t, s.profilePath("a"), authA)
 			assertMissing(t, s.profilePath("b"))
 			assertCurrent(t, s, "a")
 			assertNoIsolatedHomes(t, s)
@@ -76,6 +82,7 @@ func TestFailedFirstLoginDoesNotTouchCodexHome(t *testing.T) {
 	if _, err := s.Login("a", func(string) error { return errors.New("cancelled") }); err == nil {
 		t.Fatal("login succeeded")
 	}
+
 	assertMissing(t, s.CodexHome)
 }
 
@@ -84,6 +91,7 @@ func TestLoginAgainReplacesProfile(t *testing.T) {
 	mustLogin(t, s, "a", chatgptAuth(t, "acct-a", "r1"))
 	again := chatgptAuth(t, "acct-a", "r2")
 	mustLogin(t, s, "a", again)
+
 	assertFile(t, s.profilePath("a"), again)
 	assertFile(t, s.AuthPath(), again)
 }
@@ -93,22 +101,24 @@ func TestLoginRemovesAbandonedIsolatedHomes(t *testing.T) {
 	stale := filepath.Join(s.StateHome, loginDirPrefix+"stale")
 	writeBytes(t, filepath.Join(stale, "auth.json"), chatgptAuth(t, "acct-x", "r1"))
 	mustLogin(t, s, "a", chatgptAuth(t, "acct-a", "r1"))
+
 	assertMissing(t, stale)
 }
 
 func TestUseActivatesProfile(t *testing.T) {
 	s := newTestStore(t)
-	a := chatgptAuth(t, "acct-a", "r1")
-	b := chatgptAuth(t, "acct-b", "r1")
-	mustLogin(t, s, "a", a)
-	mustLogin(t, s, "b", b)
+	authA := chatgptAuth(t, "acct-a", "r1")
+	authB := chatgptAuth(t, "acct-b", "r1")
+	mustLogin(t, s, "a", authA)
+	mustLogin(t, s, "b", authB)
 
 	result, err := s.Use("a")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	assertWarning(t, result, "")
-	assertFile(t, s.AuthPath(), a)
+	assertFile(t, s.AuthPath(), authA)
 	assertCurrent(t, s, "a")
 	assertMissing(t, s.pendingPath())
 }
@@ -121,6 +131,7 @@ func TestSwitchingKeepsRefreshedTokens(t *testing.T) {
 	refreshedA := chatgptAuth(t, "acct-a", "r2")
 	writeBytes(t, s.AuthPath(), refreshedA)
 	mustLogin(t, s, "b", chatgptAuth(t, "acct-b", "r1"))
+
 	assertFile(t, s.profilePath("a"), refreshedA)
 
 	// Codex refreshes b's session, then the user switches back to a.
@@ -129,6 +140,7 @@ func TestSwitchingKeepsRefreshedTokens(t *testing.T) {
 	if _, err := s.Use("a"); err != nil {
 		t.Fatal(err)
 	}
+
 	assertFile(t, s.profilePath("b"), refreshedB)
 	assertFile(t, s.AuthPath(), refreshedA)
 }
@@ -143,13 +155,14 @@ func TestSwitchingNeverSavesAnotherAccount(t *testing.T) {
 		{"unverifiable account", func(t *testing.T) []byte { return apiKeyAuth(t, "sk-other") }, "could not verify"},
 		{"invalid auth.json", func(*testing.T) []byte { return []byte("{") }, "invalid"},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newTestStore(t)
-			a := chatgptAuth(t, "acct-a", "r1")
-			b := chatgptAuth(t, "acct-b", "r1")
-			mustLogin(t, s, "b", b)
-			mustLogin(t, s, "a", a)
+			authA := chatgptAuth(t, "acct-a", "r1")
+			authB := chatgptAuth(t, "acct-b", "r1")
+			mustLogin(t, s, "b", authB)
+			mustLogin(t, s, "a", authA)
 
 			// Something other than codexctl replaced auth.json.
 			writeBytes(t, s.AuthPath(), tt.active(t))
@@ -157,9 +170,10 @@ func TestSwitchingNeverSavesAnotherAccount(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			assertWarning(t, result, tt.warning)
-			assertFile(t, s.profilePath("a"), a)
-			assertFile(t, s.AuthPath(), b)
+			assertFile(t, s.profilePath("a"), authA)
+			assertFile(t, s.AuthPath(), authB)
 			assertCurrent(t, s, "b")
 		})
 	}
@@ -167,15 +181,15 @@ func TestSwitchingNeverSavesAnotherAccount(t *testing.T) {
 
 func TestUseRejectsMissingOrInvalidProfile(t *testing.T) {
 	s := newTestStore(t)
-	a := chatgptAuth(t, "acct-a", "r1")
-	mustLogin(t, s, "a", a)
+	authA := chatgptAuth(t, "acct-a", "r1")
+	mustLogin(t, s, "a", authA)
 	writeBytes(t, s.profilePath("broken"), []byte("not json"))
 
 	for _, name := range []string{"missing", "broken", "../a", ""} {
 		if _, err := s.Use(name); err == nil {
 			t.Fatalf("use %q succeeded", name)
 		}
-		assertFile(t, s.AuthPath(), a)
+		assertFile(t, s.AuthPath(), authA)
 		assertCurrent(t, s, "a")
 	}
 }
@@ -188,10 +202,12 @@ func TestUseAddsFileCredentialStoreToConfig(t *testing.T) {
 	if _, err := s.Use("a"); err != nil {
 		t.Fatal(err)
 	}
+
 	config := string(readBytes(t, s.configPath()))
 	if !rootCredentialStoreIsFile([]byte(config)) {
 		t.Fatalf("config.toml was not updated:\n%s", config)
 	}
+
 	if !strings.Contains(config, "model = \"gpt-5\"") || !strings.Contains(config, "[tui]\ntheme = \"dark\"") {
 		t.Fatalf("existing settings were lost:\n%s", config)
 	}
@@ -200,31 +216,37 @@ func TestUseAddsFileCredentialStoreToConfig(t *testing.T) {
 // auth.json was written but not current.
 func interruptedSwitch(t *testing.T) (*Store, []byte, []byte) {
 	t.Helper()
+
 	s := newTestStore(t)
-	a := chatgptAuth(t, "acct-a", "r1")
-	b := chatgptAuth(t, "acct-b", "r1")
-	mustLogin(t, s, "a", a)
-	mustLogin(t, s, "b", b)
+	authA := chatgptAuth(t, "acct-a", "r1")
+	authB := chatgptAuth(t, "acct-b", "r1")
+	mustLogin(t, s, "a", authA)
+	mustLogin(t, s, "b", authB)
+
 	writeBytes(t, s.pendingPath(), []byte("a\n"))
-	writeBytes(t, s.AuthPath(), a)
-	return s, a, b
+	writeBytes(t, s.AuthPath(), authA)
+
+	return s, authA, authB
 }
 
 func TestUseFinishesInterruptedSwitch(t *testing.T) {
-	s, _, b := interruptedSwitch(t)
+	s, _, authB := interruptedSwitch(t)
+
 	result, err := s.Use("b")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	assertWarning(t, result, "")
-	assertFile(t, s.profilePath("b"), b)
-	assertFile(t, s.AuthPath(), b)
+	assertFile(t, s.profilePath("b"), authB)
+	assertFile(t, s.AuthPath(), authB)
 	assertCurrent(t, s, "b")
 	assertMissing(t, s.pendingPath())
 }
 
 func TestSyncFinishesInterruptedSwitch(t *testing.T) {
-	s, a, b := interruptedSwitch(t)
+	s, authA, authB := interruptedSwitch(t)
+
 	result, err := s.Sync()
 	if err != nil {
 		t.Fatal(err)
@@ -232,17 +254,19 @@ func TestSyncFinishesInterruptedSwitch(t *testing.T) {
 	if result.Profile != "a" {
 		t.Fatalf("synced %q, want a", result.Profile)
 	}
-	assertFile(t, s.AuthPath(), a)
-	assertFile(t, s.profilePath("b"), b)
+
+	assertFile(t, s.AuthPath(), authA)
+	assertFile(t, s.profilePath("b"), authB)
 	assertCurrent(t, s, "a")
 	assertMissing(t, s.pendingPath())
 }
 
 func TestInvalidPendingMarkerStopsSwitch(t *testing.T) {
 	s := newTestStore(t)
-	a := chatgptAuth(t, "acct-a", "r1")
-	mustLogin(t, s, "a", a)
+	authA := chatgptAuth(t, "acct-a", "r1")
+	mustLogin(t, s, "a", authA)
 	writeBytes(t, s.pendingPath(), []byte("../../etc\n"))
+
 	if _, err := s.Use("a"); err == nil || !strings.Contains(err.Error(), "pending activation") {
 		t.Fatalf("err = %v, want a pending activation error", err)
 	}
@@ -260,6 +284,7 @@ func TestSync(t *testing.T) {
 	if result, err := s.Sync(); err != nil || result.Profile != "a" {
 		t.Fatalf("sync = %+v, %v", result, err)
 	}
+
 	assertFile(t, s.profilePath("a"), refreshed)
 
 	writeBytes(t, s.AuthPath(), chatgptAuth(t, "acct-x", "r1"))
@@ -274,10 +299,12 @@ func TestCurrentReportsMismatch(t *testing.T) {
 	if name, _, err := s.Current(); err != nil || name != "" {
 		t.Fatalf("current = %q, %v; want no selection", name, err)
 	}
+
 	mustLogin(t, s, "a", chatgptAuth(t, "acct-a", "r1"))
 	if name, matches, err := s.Current(); err != nil || name != "a" || !matches {
 		t.Fatalf("current = %q, %v, %v", name, matches, err)
 	}
+
 	writeBytes(t, s.AuthPath(), chatgptAuth(t, "acct-x", "r1"))
 	if name, matches, err := s.Current(); err != nil || name != "a" || matches {
 		t.Fatalf("current = %q, %v, %v; want a mismatch", name, matches, err)
@@ -290,14 +317,18 @@ func TestLockIsExclusive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := s.Use("a"); err == nil || !strings.Contains(err.Error(), "another codexctl operation") {
 		t.Fatalf("err = %v, want a lock error", err)
 	}
+
 	release()
+
 	again, err := s.lock()
 	if err != nil {
 		t.Fatalf("lock was not released: %v", err)
 	}
+
 	again()
 }
 
@@ -305,6 +336,7 @@ func TestSymlinksAreRefused(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symlinks needs extra privileges on Windows")
 	}
+
 	tests := []struct {
 		name string
 		path func(*Store) string
@@ -314,6 +346,7 @@ func TestSymlinksAreRefused(t *testing.T) {
 		{"current marker", (*Store).currentPath},
 		{"config.toml", (*Store).configPath},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newTestStore(t)
@@ -323,6 +356,7 @@ func TestSymlinksAreRefused(t *testing.T) {
 			target := filepath.Join(t.TempDir(), "target")
 			original := chatgptAuth(t, "acct-target", "r1")
 			writeBytes(t, target, original)
+
 			link := tt.path(s)
 			if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
 				t.Fatal(err)
@@ -334,6 +368,7 @@ func TestSymlinksAreRefused(t *testing.T) {
 			if _, err := s.Use("a"); err == nil {
 				t.Fatal("use succeeded through a symlink")
 			}
+
 			assertFile(t, target, original)
 			if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
 				t.Fatalf("symlink at %s was replaced", link)
@@ -346,14 +381,17 @@ func TestSymlinkedStateHomeIsRefused(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symlinks needs extra privileges on Windows")
 	}
+
 	s := newTestStore(t)
 	target := t.TempDir()
 	if err := os.Symlink(target, s.StateHome); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := s.Login("a", fakeLogin(chatgptAuth(t, "acct-a", "r1"))); err == nil {
 		t.Fatal("login succeeded with a symlinked state directory")
 	}
+
 	if entries, _ := os.ReadDir(target); len(entries) != 0 {
 		t.Fatalf("files were written through the symlink: %v", entries)
 	}
@@ -363,8 +401,10 @@ func TestFilePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX modes do not apply on Windows")
 	}
+
 	s := newTestStore(t)
 	mustLogin(t, s, "a", chatgptAuth(t, "acct-a", "r1"))
+
 	for path, want := range map[string]os.FileMode{
 		s.StateHome:        0o700,
 		s.profilesDir():    0o700,
@@ -376,6 +416,7 @@ func TestFilePermissions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if got := info.Mode().Perm(); got != want {
 			t.Errorf("%s has mode %o, want %o", path, got, want)
 		}
@@ -385,11 +426,13 @@ func TestFilePermissions(t *testing.T) {
 func TestValidateName(t *testing.T) {
 	valid := []string{"a", "work", "Personal-2", "team.alpha", "a_b", "0", strings.Repeat("x", 64)}
 	invalid := []string{"", "-a", ".a", "_a", "../a", "a/b", `a\b`, "a b", "a:b", strings.Repeat("x", 65), "é"}
+
 	for _, name := range valid {
 		if err := ValidateName(name); err != nil {
 			t.Errorf("ValidateName(%q) = %v, want nil", name, err)
 		}
 	}
+
 	for _, name := range invalid {
 		if ValidateName(name) == nil {
 			t.Errorf("ValidateName(%q) accepted an invalid name", name)

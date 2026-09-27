@@ -12,14 +12,16 @@ const (
 
 // Access denied means the process exists but belongs to another user.
 func processAlive(pid int) bool {
-	h, err := syscall.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
+	handle, err := syscall.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
 	if err != nil {
 		return errors.Is(err, syscall.ERROR_ACCESS_DENIED)
 	}
-	defer syscall.CloseHandle(h)
-	var code uint32
-	if err := syscall.GetExitCodeProcess(h, &code); err != nil {
+	defer syscall.CloseHandle(handle)
+
+	var exitCode uint32
+	if err := syscall.GetExitCodeProcess(handle, &exitCode); err != nil {
 		return false
 	}
-	return code == stillActive
+
+	return exitCode == stillActive
 }

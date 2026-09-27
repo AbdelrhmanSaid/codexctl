@@ -17,6 +17,7 @@ func TestRootCredentialStoreIsFile(t *testing.T) {
 		{"[profiles.work]\ncli_auth_credentials_store = \"file\"", false},
 		{"model = \"x\"\ncli_auth_credentials_store = \"file\"\n[tui]\n", true},
 	}
+
 	for _, tt := range tests {
 		if got := rootCredentialStoreIsFile([]byte(tt.config)); got != tt.want {
 			t.Errorf("rootCredentialStoreIsFile(%q) = %v, want %v", tt.config, got, tt.want)
@@ -44,12 +45,14 @@ func TestSetRootCredentialStore(t *testing.T) {
 			"# Managed by codexctl so named auth.json profiles are effective.\ncli_auth_credentials_store = \"file\"\n",
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := string(setRootCredentialStore([]byte(tt.config)))
 			if got != tt.want {
 				t.Fatalf("got:\n%s\nwant:\n%s", got, tt.want)
 			}
+
 			if !rootCredentialStoreIsFile([]byte(got)) {
 				t.Fatal("result is not recognised as file-backed")
 			}

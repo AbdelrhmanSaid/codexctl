@@ -14,14 +14,18 @@ func TestReadUsage(t *testing.T) {
 		`not json`,
 		`{"id":2,"result":{"accountId":"acct","rateLimits":{"primary":{"usedPercent":15,"windowDurationMins":300,"resetsAt":1790551805},"secondary":null}}}`,
 	}, "\n") + "\n"
+
 	var stdin bytes.Buffer
-	u, err := readUsage(&stdin, strings.NewReader(stdout))
+
+	usage, err := readUsage(&stdin, strings.NewReader(stdout))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.AccountID != "acct" || u.Secondary != nil || u.Primary.UsedPercent != 15 || u.Primary.Minutes != 300 || !u.Primary.ResetsAt.Equal(time.Unix(1790551805, 0)) {
-		t.Fatalf("usage = %+v, primary = %+v", u, u.Primary)
+
+	if usage.AccountID != "acct" || usage.Secondary != nil || usage.Primary.UsedPercent != 15 || usage.Primary.Minutes != 300 || !usage.Primary.ResetsAt.Equal(time.Unix(1790551805, 0)) {
+		t.Fatalf("usage = %+v, primary = %+v", usage, usage.Primary)
 	}
+
 	for _, method := range []string{`"initialize"`, `"initialized"`, `"account/rateLimits/read"`} {
 		if !strings.Contains(stdin.String(), method) {
 			t.Fatalf("requests %q do not include %s", stdin.String(), method)

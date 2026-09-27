@@ -15,9 +15,11 @@ func main() {
 		if errors.Is(err, tui.ErrCancelled) {
 			os.Exit(130)
 		}
+
 		if errors.Is(err, cli.ErrReported) {
 			os.Exit(1)
 		}
+
 		cli.PrintError(os.Stderr, err)
 		os.Exit(1)
 	}

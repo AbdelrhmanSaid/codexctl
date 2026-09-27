@@ -19,26 +19,29 @@ func PublicKey() (ed25519.PublicKey, error) {
 // GenerateKey returns the public key embedded in the binary and the private
 // key kept as a CI secret.
 func GenerateKey() (public, private string, err error) {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return "", "", err
 	}
-	return base64.StdEncoding.EncodeToString(pub), base64.StdEncoding.EncodeToString(priv.Seed()), nil
+
+	return base64.StdEncoding.EncodeToString(publicKey), base64.StdEncoding.EncodeToString(privateKey.Seed()), nil
 }
 
-func DecodePublicKey(s string) (ed25519.PublicKey, error) {
-	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(s))
+func DecodePublicKey(encoded string) (ed25519.PublicKey, error) {
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
 	if err != nil || len(key) != ed25519.PublicKeySize {
 		return nil, errors.New("invalid release public key")
 	}
+
 	return ed25519.PublicKey(key), nil
 }
 
-func DecodePrivateKey(s string) (ed25519.PrivateKey, error) {
-	seed, err := base64.StdEncoding.DecodeString(strings.TrimSpace(s))
+func DecodePrivateKey(encoded string) (ed25519.PrivateKey, error) {
+	seed, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
 	if err != nil || len(seed) != ed25519.SeedSize {
 		return nil, errors.New("invalid signing key: expected a base64 32-byte Ed25519 seed")
 	}
+
 	return ed25519.NewKeyFromSeed(seed), nil
 }
 
@@ -47,12 +50,14 @@ func Sign(key ed25519.PrivateKey, data []byte) []byte {
 }
 
 func Verify(key ed25519.PublicKey, data, signature []byte) error {
-	sig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(signature)))
-	if err != nil || len(sig) != ed25519.SignatureSize {
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(signature)))
+	if err != nil || len(decoded) != ed25519.SignatureSize {
 		return errors.New("signature is malformed")
 	}
-	if !ed25519.Verify(key, data, sig) {
+
+	if !ed25519.Verify(key, data, decoded) {
 		return errors.New("signature does not match the release public key")
 	}
+
 	return nil
 }

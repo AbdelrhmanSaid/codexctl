@@ -31,6 +31,7 @@ func Find() (*CLI, error) {
 	if err != nil {
 		return nil, errors.New("codex executable was not found in PATH")
 	}
+
 	return &CLI{Path: path}, nil
 }
 
@@ -57,30 +58,37 @@ func (c *CLI) run(stdio Stdio, env []string, args ...string) error {
 	child := exec.Command(c.Path, args...)
 	child.Env = env
 	child.Stdin, child.Stdout, child.Stderr = stdio.In, stdio.Out, stdio.Err
+
 	return child.Run()
 }
 
 func (o LoginOptions) args() []string {
 	args := []string{"login"}
+
 	if o.DeviceAuth {
 		args = append(args, "--device-auth")
 	}
+
 	if o.APIKey {
 		args = append(args, "--with-api-key")
 	}
+
 	if o.AccessToken {
 		args = append(args, "--with-access-token")
 	}
+
 	return args
 }
 
 func setEnv(env []string, key, value string) []string {
 	prefix := key + "="
 	result := make([]string, 0, len(env)+1)
-	for _, item := range env {
-		if !strings.HasPrefix(item, prefix) {
-			result = append(result, item)
+
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			result = append(result, entry)
 		}
 	}
+
 	return append(result, prefix+value)
 }

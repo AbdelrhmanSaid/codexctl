@@ -27,9 +27,10 @@ type fitted struct {
 }
 
 func (f fitted) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if size, ok := msg.(tea.WindowSizeMsg); ok {
-		f.sizer.resize(size.Width, size.Height)
+	if sizeMsg, ok := msg.(tea.WindowSizeMsg); ok {
+		f.sizer.resize(sizeMsg.Width, sizeMsg.Height)
 	}
+
 	// Models change in place and return themselves.
 	_, cmd := f.Model.Update(msg)
 	return f, cmd
@@ -37,25 +38,29 @@ func (f fitted) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // Inline, never the alternate screen, so a finished prompt stays in the
 // scrollback.
-func run(env Env, m tea.Model) error {
-	if sizer, ok := m.(interface{ resize(width, height int) }); ok {
+func run(env Env, model tea.Model) error {
+	if sizer, ok := model.(interface{ resize(width, height int) }); ok {
 		sizer.resize(size(env.Out))
-		m = fitted{Model: m, sizer: sizer}
+		model = fitted{Model: model, sizer: sizer}
 	}
-	_, err := tea.NewProgram(m, tea.WithInput(env.In), tea.WithOutput(env.Out)).Run()
+
+	_, err := tea.NewProgram(model, tea.WithInput(env.In), tea.WithOutput(env.Out)).Run()
+
 	return err
 }
 
-func ask(env Env, m interface {
+func ask(env Env, model interface {
 	tea.Model
 	wasCancelled() bool
 }) error {
-	if err := run(env, m); err != nil {
+	if err := run(env, model); err != nil {
 		return err
 	}
-	if m.wasCancelled() {
+
+	if model.wasCancelled() {
 		return ErrCancelled
 	}
+
 	return nil
 }
 
@@ -72,6 +77,7 @@ func (t *Theme) describe(texts []string, width int) []string {
 			lines = append(lines, t.Muted.Render(line))
 		}
 	}
+
 	return lines
 }
 
@@ -79,5 +85,6 @@ func (t *Theme) problem(text string, width int) []string {
 	if text == "" {
 		return nil
 	}
+
 	return t.note(Note{Text: text, Level: LevelWarn}, width, false)
 }

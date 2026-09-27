@@ -20,6 +20,7 @@ import (
 // CODEXCTL_NO_TUI or TERM=dumb keeps every command on plain text.
 func (a *app) detectTerminals(stdin io.Reader, stdout, stderr io.Writer) {
 	a.interactive = isTerminal(stdin)
+
 	allowed := styleAllowed()
 	a.styledOut = allowed && isTerminal(stdout)
 	a.styledErr = allowed && isTerminal(stderr)
@@ -35,12 +36,13 @@ func PrintError(w io.Writer, err error) {
 		fmt.Fprint(w, tui.NewTheme(w).Failure(capitalize(err.Error())))
 		return
 	}
+
 	fmt.Fprintf(w, "codexctl: %v\n", err)
 }
 
-func isTerminal(v any) bool {
-	f, ok := v.(*os.File)
-	return ok && term.IsTerminal(f.Fd())
+func isTerminal(stream any) bool {
+	file, ok := stream.(*os.File)
+	return ok && term.IsTerminal(file.Fd())
 }
 
 // Prompts draw on stderr, so stdout stays clean for results.
@@ -77,6 +79,7 @@ func (m message) text(show func(any) any) string {
 	for i, arg := range m.args {
 		args[i] = show(arg)
 	}
+
 	return fmt.Sprintf(m.format, args...)
 }
 
@@ -85,22 +88,26 @@ func (m message) plain() string {
 		if name, ok := arg.(profileName); ok {
 			return strconv.Quote(string(name))
 		}
+
 		return arg
 	}) + "."
+
 	if m.hint != "" {
 		line += " " + m.hint
 	}
+
 	return line
 }
 
-func (m message) styled(t *tui.Theme) string {
+func (m message) styled(theme *tui.Theme) string {
 	return m.text(func(arg any) any {
 		switch arg := arg.(type) {
 		case profileName:
-			return t.Name(string(arg))
+			return theme.Name(string(arg))
 		case filePath:
 			return displayPath(string(arg))
 		}
+
 		return arg
 	})
 }
@@ -113,12 +120,14 @@ func (a *app) success(cmd *cobra.Command, m message) {
 		a.record(tui.LevelOK, line)
 		return
 	}
-	t := outTheme(cmd)
-	line := m.styled(t)
-	fmt.Fprint(out, t.Success(line))
+
+	theme := outTheme(cmd)
+	line := m.styled(theme)
+	fmt.Fprint(out, theme.Success(line))
 	a.record(tui.LevelOK, line)
+
 	if m.hint != "" {
-		fmt.Fprint(out, t.Hint(m.hint))
+		fmt.Fprint(out, theme.Hint(m.hint))
 		a.record(tui.LevelInfo, m.hint)
 	}
 }
@@ -127,12 +136,13 @@ func (a *app) report(cmd *cobra.Command, result store.Result, m message) {
 	for _, warning := range result.Warnings {
 		a.warn(cmd, warning)
 	}
+
 	a.success(cmd, m)
 }
 
-func (a *app) finish(cmd *cobra.Command, s *store.Store, result store.Result, m message) {
+func (a *app) finish(cmd *cobra.Command, profileStore *store.Store, result store.Result, m message) {
 	a.report(cmd, result, m)
-	a.offerDaemonRestart(cmd, s, result.AuthChanged)
+	a.offerDaemonRestart(cmd, profileStore, result.AuthChanged)
 }
 
 func (a *app) record(level tui.Level, text string) {
@@ -145,11 +155,14 @@ func (a *app) warn(cmd *cobra.Command, warning string) {
 	if warning == "" {
 		return
 	}
+
 	a.record(tui.LevelWarn, capitalize(warning))
+
 	if a.styledErr {
 		fmt.Fprint(cmd.ErrOrStderr(), errTheme(cmd).Warning(capitalize(warning)))
 		return
 	}
+
 	fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
 }
 
@@ -159,39 +172,45 @@ func displayPath(path string) string {
 	if err != nil || home == "" {
 		return path
 	}
+
 	if path == home {
 		return "~"
 	}
+
 	if rest, ok := strings.CutPrefix(path, home+string(filepath.Separator)); ok {
 		return "~" + string(filepath.Separator) + rest
 	}
+
 	return path
 }
 
-func countNoun(n int, noun string) string {
-	if n == 1 {
+func countNoun(count int, noun string) string {
+	if count == 1 {
 		return "1 " + noun
 	}
-	return fmt.Sprintf("%d %ss", n, noun)
+
+	return fmt.Sprintf("%d %ss", count, noun)
 }
 
 func capitalize(message string) string {
 	if message == "" {
 		return message
 	}
-	r, size := utf8.DecodeRuneInString(message)
-	return string(unicode.ToUpper(r)) + message[size:]
+
+	first, size := utf8.DecodeRuneInString(message)
+	return string(unicode.ToUpper(first)) + message[size:]
 }
 
 func (a *app) busy(cmd *cobra.Command, title string, work func() error) error {
 	if !a.tui {
 		return work()
 	}
+
 	return tui.Spin(env(cmd), title, work)
 }
 
 func confirmDanger(cmd *cobra.Command, title, affirmative string, description ...string) error {
-	ok, err := tui.Confirm(env(cmd), tui.ConfirmOptions{
+	confirmed, err := tui.Confirm(env(cmd), tui.ConfirmOptions{
 		Title:       title,
 		Description: description,
 		Affirmative: affirmative,
@@ -201,8 +220,10 @@ func confirmDanger(cmd *cobra.Command, title, affirmative string, description ..
 	if err != nil {
 		return err
 	}
-	if !ok {
+
+	if !confirmed {
 		return tui.ErrCancelled
 	}
+
 	return nil
 }

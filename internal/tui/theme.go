@@ -71,10 +71,13 @@ var (
 
 func NewTheme(w io.Writer) *Theme {
 	r := lipgloss.NewRenderer(w)
+
 	// Asking for the background color can swallow typed keys, so ask once.
 	darkOnce.Do(func() { dark = lipgloss.HasDarkBackground() })
 	r.SetHasDarkBackground(dark)
+
 	button := r.NewStyle().Padding(0, 2).Foreground(muted)
+
 	return &Theme{
 		r:        r,
 		Title:    r.NewStyle().Bold(true),
@@ -110,14 +113,16 @@ func (e Env) theme() *Theme { return NewTheme(e.Out) }
 
 // Zeros when w is not a terminal.
 func size(w io.Writer) (width, height int) {
-	f, ok := w.(*os.File)
+	file, ok := w.(*os.File)
 	if !ok {
 		return 0, 0
 	}
-	width, height, err := term.GetSize(f.Fd())
+
+	width, height, err := term.GetSize(file.Fd())
 	if err != nil {
 		return 0, 0
 	}
+
 	return width, height
 }
 
@@ -126,6 +131,7 @@ func wrap(text string, width int) []string {
 	if width > 0 {
 		text = ansi.Wrap(text, width, "")
 	}
+
 	return strings.Split(text, "\n")
 }
 
@@ -133,15 +139,17 @@ func fit(line string, width int) string {
 	if width <= 0 {
 		return line
 	}
+
 	return ansi.Truncate(line, width, "…")
 }
 
 func indent(prefix string, lines []string) []string {
-	out := make([]string, len(lines))
+	indented := make([]string, len(lines))
 	for i, line := range lines {
-		out[i] = prefix + line
+		indented[i] = prefix + line
 	}
-	return out
+
+	return indented
 }
 
 func (t *Theme) help(width int, pairs ...string) []string {
@@ -149,6 +157,7 @@ func (t *Theme) help(width int, pairs ...string) []string {
 	for i := 0; i+1 < len(pairs); i += 2 {
 		hints = append(hints, t.Key.Render(pairs[i])+" "+t.Muted.Render(pairs[i+1]))
 	}
+
 	return t.flow(width, hints)
 }
 
@@ -156,31 +165,35 @@ func (t *Theme) help(width int, pairs ...string) []string {
 // wider than the line is truncated.
 func (t *Theme) flow(width int, parts []string) []string {
 	separator := t.Muted.Render(glyphSeparator)
+
 	var lines []string
 	line, used := "", 0
+
 	for _, part := range parts {
-		w := lipgloss.Width(part)
+		partWidth := lipgloss.Width(part)
 		switch {
 		case line == "":
-			line, used = part, w
-		case width > 0 && used+lipgloss.Width(glyphSeparator)+w > width:
+			line, used = part, partWidth
+		case width > 0 && used+lipgloss.Width(glyphSeparator)+partWidth > width:
 			lines = append(lines, fit(line, width))
-			line, used = part, w
+			line, used = part, partWidth
 		default:
 			line += separator + part
-			used += lipgloss.Width(glyphSeparator) + w
+			used += lipgloss.Width(glyphSeparator) + partWidth
 		}
 	}
+
 	if line != "" {
 		lines = append(lines, fit(line, width))
 	}
+
 	return lines
 }
 
 // A plain note has no glyph and starts at the edge unless gutter is set.
-func (t *Theme) note(n Note, width int, gutter bool) []string {
+func (t *Theme) note(note Note, width int, gutter bool) []string {
 	style, glyph := t.Muted, ""
-	switch n.Level {
+	switch note.Level {
 	case LevelOK:
 		style, glyph = t.Text, t.OK.Render(glyphOK)
 	case LevelWarn:
@@ -188,18 +201,22 @@ func (t *Theme) note(n Note, width int, gutter bool) []string {
 	case LevelFail:
 		style, glyph = t.Text, t.Err.Render(glyphFail)
 	}
+
 	margin := ""
 	if glyph != "" || gutter {
 		margin = "  "
 	}
-	lines := wrap(n.Text, width-len(margin))
+
+	lines := wrap(note.Text, width-len(margin))
 	for i, line := range lines {
 		lead := margin
 		if i == 0 && glyph != "" {
 			lead = glyph + " "
 		}
+
 		lines[i] = lead + style.Render(line)
 	}
+
 	return lines
 }
 
@@ -211,6 +228,7 @@ func (t *Theme) answered(title, answer string) string {
 	if !strings.HasSuffix(title, "?") {
 		title += ":"
 	}
+
 	return t.OK.Render(glyphOK) + " " + t.Title.Render(title) + " " + t.Accent.Render(answer) + "\n"
 }
 

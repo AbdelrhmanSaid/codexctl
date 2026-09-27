@@ -10,26 +10,32 @@ func TestRootWithoutTerminalPrintsHelp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	assertContains(t, stdout, "Usage:")
+
 	_, _, err = h.run(t, "", "lst")
 	if err == nil {
 		t.Fatal("an unknown command succeeded")
 	}
+
 	assertContains(t, err.Error(), "Did you mean this?")
 }
 
 func TestDashboardOptions(t *testing.T) {
 	h := newHarness(t)
 	h.seed(t, "home", "work")
-	s := h.store()
-	profiles, err := s.Profiles()
+
+	profileStore := h.store()
+	profiles, err := profileStore.Profiles()
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := dashboardOptions(s, dashboardRows(profiles, nil, nil))
+
+	opts := dashboardOptions(profileStore, dashboardRows(profiles, nil, nil))
 	if len(opts.Rows) != 2 || !opts.Rows[1].Active {
 		t.Fatalf("rows = %+v, want work active", opts.Rows)
 	}
+
 	for _, action := range opts.Actions {
 		if action.Key == "R" {
 			t.Fatal("restart offered without a running daemon")
@@ -38,10 +44,12 @@ func TestDashboardOptions(t *testing.T) {
 
 	h.daemon = running(42)
 	opts = dashboardOptions(h.store(), dashboardRows(profiles, nil, nil))
+
 	found := false
 	for _, action := range opts.Actions {
 		found = found || action.Key == "R"
 	}
+
 	if !found {
 		t.Fatal("restart not offered with a running daemon")
 	}
