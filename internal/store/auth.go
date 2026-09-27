@@ -13,8 +13,9 @@ type authInfo struct {
 	APIKey      string `json:"OPENAI_API_KEY"`
 	LastRefresh string `json:"last_refresh"`
 	Tokens      struct {
-		IDToken   string `json:"id_token"`
-		AccountID string `json:"account_id"`
+		IDToken      string `json:"id_token"`
+		RefreshToken string `json:"refresh_token"`
+		AccountID    string `json:"account_id"`
 	} `json:"tokens"`
 }
 

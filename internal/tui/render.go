@@ -27,6 +27,20 @@ func (t *Theme) Name(name string) string {
 	return t.Accent.Render(name)
 }
 
+// Meter is a bar of width cells, filled to the percent left and colored by
+// how little that is.
+func (t *Theme) Meter(left float64, width int) string {
+	filled := min(width, max(0, int(left/100*float64(width)+0.5)))
+	style := t.OK
+	switch {
+	case left < 10:
+		style = t.Err
+	case left < 30:
+		style = t.Warn
+	}
+	return style.Render(strings.Repeat(glyphMeter, filled)) + t.Faint.Render(strings.Repeat(glyphMeter, width-filled))
+}
+
 type Row struct {
 	Cells  []string
 	Active bool

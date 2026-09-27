@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +36,7 @@ type codexCLI interface {
 	Login(home string, opts codex.LoginOptions, stdio codex.Stdio) error
 	Logout(home string, stdio codex.Stdio) error
 	RestartDaemon(home string, stdio codex.Stdio) error
+	Usage(ctx context.Context, home string, isolated bool) (codex.Usage, error)
 }
 
 // app resolves its dependencies lazily, so help never touches the
@@ -96,6 +98,7 @@ func (a *app) newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.C
 		a.newListCommand(),
 		a.newCurrentCommand(),
 		a.newShowCommand(),
+		a.newUsageCommand(),
 		a.newSyncCommand(),
 		a.newRenameCommand(),
 		a.newRemoveCommand(),

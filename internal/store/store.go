@@ -56,6 +56,7 @@ func (s *Store) Login(name string, runLogin func(home string) error) (Result, er
 	}
 	defer op.release()
 
+	s.removeAbandonedLogins()
 	tempHome, err := s.isolatedHome()
 	if err != nil {
 		return Result{}, err
@@ -90,8 +91,20 @@ func (s *Store) Login(name string, runLogin func(home string) error) (Result, er
 }
 
 // The caller must hold the lock and remove the directory.
+func (s *Store) isolatedLogin(data []byte) (string, error) {
+	home, err := s.isolatedHome()
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), data, 0o600); err != nil {
+		os.RemoveAll(home)
+		return "", fmt.Errorf("write isolated credentials: %w", err)
+	}
+	return home, nil
+}
+
+// The caller must hold the lock and remove the directory.
 func (s *Store) isolatedHome() (string, error) {
-	s.removeAbandonedLogins()
 	home, err := os.MkdirTemp(s.StateHome, loginDirPrefix+"*")
 	if err != nil {
 		return "", fmt.Errorf("create isolated Codex home: %w", err)

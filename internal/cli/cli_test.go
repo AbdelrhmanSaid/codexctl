@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 type fakeCodex struct {
 	restarted  []string
 	restartErr error
+	usage      map[string]codex.Usage // by account ID
 }
 
 func authJSON(account string) []byte {
@@ -36,6 +38,26 @@ func (f *fakeCodex) RestartDaemon(home string, stdio codex.Stdio) error {
 	f.restarted = append(f.restarted, home)
 	fmt.Fprintln(stdio.Out, `{"status":"restarted"}`)
 	return f.restartErr
+}
+
+func (f *fakeCodex) Usage(_ context.Context, home string, _ bool) (codex.Usage, error) {
+	data, err := os.ReadFile(filepath.Join(home, "auth.json"))
+	if err != nil {
+		return codex.Usage{}, err
+	}
+	var auth struct {
+		Tokens struct {
+			AccountID string `json:"account_id"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(data, &auth); err != nil {
+		return codex.Usage{}, err
+	}
+	u, ok := f.usage[auth.Tokens.AccountID]
+	if !ok {
+		return codex.Usage{}, errors.New("401 Unauthorized")
+	}
+	return u, nil
 }
 
 type harness struct {

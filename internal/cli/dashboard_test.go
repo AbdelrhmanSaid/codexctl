@@ -26,7 +26,7 @@ func TestDashboardOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := dashboardOptions(s, profiles)
+	opts := dashboardOptions(s, dashboardRows(profiles, nil, nil))
 	if len(opts.Rows) != 2 || !opts.Rows[1].Active {
 		t.Fatalf("rows = %+v, want work active", opts.Rows)
 	}
@@ -37,7 +37,7 @@ func TestDashboardOptions(t *testing.T) {
 	}
 
 	h.daemon = running(42)
-	opts = dashboardOptions(h.store(), profiles)
+	opts = dashboardOptions(h.store(), dashboardRows(profiles, nil, nil))
 	found := false
 	for _, action := range opts.Actions {
 		found = found || action.Key == "R"

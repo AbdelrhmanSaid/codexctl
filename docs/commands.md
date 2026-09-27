@@ -8,6 +8,7 @@
 | `list` (`ls`) | List profiles; `-v` adds account details |
 | `current` | Print the active profile |
 | `show NAME` | Show a profile's account details |
+| `usage [NAME...]` | Show how much of each account's usage limits is left |
 | `sync` | Save refreshed tokens into the active profile |
 | `rename OLD NEW` | Rename a profile |
 | `remove NAME...` (`rm`) | Delete profiles |
@@ -23,7 +24,7 @@ instead. See [Terminal UI](terminal-ui.md).
 
 ## Scripting
 
-- `list`, `current`, `show` and `doctor` accept `--json`.
+- `list`, `current`, `show`, `usage` and `doctor` accept `--json`.
 - Piped output is plain text, and never prompts.
 - `doctor` exits with status 1 when it finds a problem.
 - `current --json` reports `"daemon_stale": true` when the Codex daemon
@@ -56,3 +57,9 @@ was the active profile, `auth.json` is removed too.
 
 **show** and `list -v` print the account ID, email, plan and last refresh
 time. They never print tokens or keys.
+
+**usage** asks Codex (`codex app-server`) for each account's 5-hour and weekly
+limits. The selected profile is checked through the real Codex home. Every
+other profile is checked in an isolated copy, and credentials Codex refreshes
+there are saved back into the profile, since a refresh retires the old token.
+API key profiles have no limits and are skipped.

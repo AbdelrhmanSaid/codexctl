@@ -2,7 +2,8 @@
 
 ## Dashboard
 
-Run `codexctl` with no arguments on a terminal.
+Run `codexctl` with no arguments on a terminal. Each profile shows how much of
+its usage limits is left; they load in the background when the dashboard opens.
 
 | Key | Action |
 | --- | --- |
@@ -15,6 +16,7 @@ Run `codexctl` with no arguments on a terminal.
 | `n` | Log in to a new profile |
 | `i` | Import the current Codex login |
 | `R` | Restart the Codex daemon (shown when one is running) |
+| `f` | Refresh usage limits |
 | `D` | Run `doctor` |
 | `U` | Run `update` |
 | `q` | Quit |

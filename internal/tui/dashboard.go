@@ -12,10 +12,17 @@ import (
 
 type DashboardRow struct {
 	Name    string
-	Detail  string // account summary shown beside the name
-	Extra   string // more detail shown under the list for the focused row
+	Detail  string   // account summary shown beside the name
+	Extra   []string // more detail shown under the list for the focused row
 	Active  bool
 	Invalid bool
+	Meters  []Meter
+	Status  string // shown in place of meters
+}
+
+type Meter struct {
+	Label string
+	Left  float64 // percent
 }
 
 type Level int
@@ -46,7 +53,11 @@ type DashboardOptions struct {
 	Results  []Note // what the last action reported
 	Actions  []Action
 	Cursor   int
+	// Load runs in the background and its rows replace Rows.
+	Load func() []DashboardRow
 }
+
+type loadedMsg []DashboardRow
 
 // DashboardChoice has an empty Key when the user quit.
 type DashboardChoice struct {
@@ -69,9 +80,18 @@ type dashboardModel struct {
 	done   bool
 }
 
-func (m *dashboardModel) Init() tea.Cmd { return nil }
+func (m *dashboardModel) Init() tea.Cmd {
+	if m.opts.Load == nil {
+		return nil
+	}
+	return func() tea.Msg { return loadedMsg(m.opts.Load()) }
+}
 
 func (m *dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if rows, ok := msg.(loadedMsg); ok && len(rows) == len(m.opts.Rows) {
+		m.opts.Rows = rows
+		return m, nil
+	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
@@ -154,10 +174,7 @@ func (m *dashboardModel) rows(room int) []string {
 		text := "No profiles yet. Press n to log in or i to import the current login."
 		return indent("    ", wrap(t.Muted.Render(text), m.width-4))
 	}
-	width := 0
-	for _, row := range rows {
-		width = max(width, lipgloss.Width(row.Name))
-	}
+	cols := m.columns()
 	first, end := 0, len(rows)
 	var lines []string
 	if room > 0 && len(rows) > room {
@@ -167,7 +184,7 @@ func (m *dashboardModel) rows(room int) []string {
 		lines = append(lines, m.more("↑", first))
 	}
 	for i := first; i < end; i++ {
-		lines = append(lines, m.row(rows[i], i == m.cursor, width))
+		lines = append(lines, m.row(rows[i], i == m.cursor, cols))
 	}
 	if end-first < len(rows) {
 		lines = append(lines, m.more("↓", len(rows)-end))
@@ -182,7 +199,34 @@ func (m *dashboardModel) more(arrow string, count int) string {
 	return m.theme.Muted.Render(fmt.Sprintf("    %s %d more", arrow, count))
 }
 
-func (m *dashboardModel) row(row DashboardRow, focused bool, width int) string {
+type columns struct {
+	name, detail int
+	bars         bool
+}
+
+// Shared by every row so they line up. When a row does not fit, the bars go
+// first, then the end of the detail.
+func (m *dashboardModel) columns() columns {
+	c := columns{bars: true}
+	var withBars, compact int
+	for _, row := range m.opts.Rows {
+		c.name = max(c.name, lipgloss.Width(row.Name))
+		c.detail = max(c.detail, lipgloss.Width(row.Detail))
+		withBars = max(withBars, lipgloss.Width(m.meters(row, true)))
+		compact = max(compact, lipgloss.Width(m.meters(row, false)))
+	}
+	if m.width <= 0 {
+		return c
+	}
+	fixed := len("    ") + c.name + len("  ") + len("  ")
+	if fixed+c.detail+withBars > m.width {
+		c.bars = false
+		c.detail = max(min(c.detail, 12), min(c.detail, m.width-fixed-compact))
+	}
+	return c
+}
+
+func (m *dashboardModel) row(row DashboardRow, focused bool, cols columns) string {
 	t := m.theme
 	cursor, marker := "  ", "  "
 	if focused {
@@ -191,29 +235,58 @@ func (m *dashboardModel) row(row DashboardRow, focused bool, width int) string {
 	if row.Active {
 		marker = t.OK.Render(glyphActive) + " "
 	}
-	name := row.Name + strings.Repeat(" ", width-lipgloss.Width(row.Name))
+	name := row.Name + strings.Repeat(" ", cols.name-lipgloss.Width(row.Name))
 	switch {
 	case row.Invalid:
 		name = t.Muted.Render(name)
 	case focused || row.Active:
 		name = t.Selected.Render(name)
 	}
-	detail := t.Muted.Render(row.Detail)
+	padded := ansi.Truncate(row.Detail, cols.detail, "…")
+	padded += strings.Repeat(" ", cols.detail-lipgloss.Width(padded))
+	detail := t.Muted.Render(padded)
 	if focused && !row.Invalid {
-		detail = t.Text.Render(row.Detail)
+		detail = t.Text.Render(padded)
 	}
-	return fit(strings.TrimRight(cursor+marker+name+"  "+detail, " "), m.width)
+	line := cursor + marker + name + "  " + detail + "  " + m.meters(row, cols.bars)
+	return fit(strings.TrimRight(line, " "), m.width)
 }
 
-// Kept for every profile once any has one, so moving does not shift what
-// follows.
-func (m *dashboardModel) detail() []string {
-	for _, row := range m.opts.Rows {
-		if row.Extra != "" {
-			return []string{"", fit("    "+m.theme.Muted.Render(m.opts.Rows[m.cursor].Extra), m.width)}
-		}
+func (m *dashboardModel) meters(row DashboardRow, bars bool) string {
+	t := m.theme
+	if len(row.Meters) == 0 {
+		return t.Muted.Render(row.Status)
 	}
-	return nil
+	parts := make([]string, len(row.Meters))
+	for i, meter := range row.Meters {
+		parts[i] = t.Muted.Render(meter.Label) + " "
+		if bars {
+			parts[i] += t.Meter(meter.Left, 8) + " "
+		}
+		parts[i] += fmt.Sprintf("%3.0f%%", meter.Left)
+	}
+	return strings.Join(parts, "   ")
+}
+
+// As tall as the longest detail, so moving does not shift what follows.
+func (m *dashboardModel) detail() []string {
+	width := m.width - 4
+	height := 0
+	for _, row := range m.opts.Rows {
+		height = max(height, len(m.theme.flow(width, row.Extra)))
+	}
+	if height == 0 {
+		return nil
+	}
+	var parts []string
+	for _, part := range m.opts.Rows[m.cursor].Extra {
+		parts = append(parts, m.theme.Muted.Render(part))
+	}
+	lines := indent("    ", m.theme.flow(width, parts))
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	return append([]string{""}, lines...)
 }
 
 func (m *dashboardModel) results() []string {

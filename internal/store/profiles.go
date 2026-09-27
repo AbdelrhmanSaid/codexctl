@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 )
 
 type Profile struct {
@@ -153,14 +152,12 @@ func (s *Store) Logout(name string, runLogout func(home string) error) (Result, 
 		}
 	}
 
-	tempHome, err := s.isolatedHome()
+	s.removeAbandonedLogins()
+	tempHome, err := s.isolatedLogin(data)
 	if err != nil {
 		return Result{}, err
 	}
 	defer os.RemoveAll(tempHome)
-	if err := os.WriteFile(filepath.Join(tempHome, "auth.json"), data, 0o600); err != nil {
-		return Result{}, fmt.Errorf("write isolated logout credentials: %w", err)
-	}
 	if err := runLogout(tempHome); err != nil {
 		return Result{}, fmt.Errorf("codex logout failed; profile %q was kept: %w", name, err)
 	}

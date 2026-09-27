@@ -310,7 +310,7 @@ func TestDashboardFillsTheTerminal(t *testing.T) {
 		Subtitle: "1.0.0",
 		Notes:    []Note{{Text: "The Codex daemon (pid 42) still uses the previous credentials; press R to restart it.", Level: LevelWarn}},
 		Rows: []DashboardRow{
-			{Name: "home", Detail: "someone@example.com · Plus", Extra: "Account 123", Active: true},
+			{Name: "home", Detail: "someone@example.com · Plus", Extra: []string{"Account 123"}, Active: true},
 			{Name: "work", Detail: "someone.else@example.com · Team"},
 		},
 		Results: []Note{{Text: "Now using profile home", Level: LevelOK}, {Text: "Restart running Codex clients to pick it up."}},
@@ -401,5 +401,37 @@ func TestHelpWraps(t *testing.T) {
 		if lipgloss.Width(line) > 24 {
 			t.Fatalf("list line %q is wider than 24", line)
 		}
+	}
+}
+
+func TestDashboardNarrowKeepsDetailAndUsage(t *testing.T) {
+	extra := []string{"5h resets in 3 hours", "weekly resets in 5 days", "Account b7fe8e99-0a81-487f-ba9f", "refreshed 4 days ago"}
+	opts := DashboardOptions{
+		Rows: []DashboardRow{
+			{Name: "main", Detail: "someone@example.com · team", Extra: extra, Active: true, Meters: []Meter{{Label: "5h", Left: 84}, {Label: "weekly", Left: 94}}},
+			{Name: "key", Detail: "API key"},
+		},
+	}
+	m := &dashboardModel{opts: opts, theme: plainTheme()}
+	for _, width := range []int{60, 48} {
+		m.resize(width, 24)
+		view := m.View()
+		for _, want := range append(extra, "84%", "94%") {
+			if !strings.Contains(view, want) {
+				t.Fatalf("%d wide: view does not contain %q:\n%s", width, want, view)
+			}
+		}
+		if strings.Contains(view, glyphMeter) {
+			t.Fatalf("%d wide: bars kept on a narrow screen:\n%s", width, view)
+		}
+	}
+	focused := m.detail()
+	m.cursor = 1
+	if other := m.detail(); len(other) != len(focused) {
+		t.Fatalf("detail is %d lines for one row and %d for another", len(focused), len(other))
+	}
+	m.resize(140, 24)
+	if !strings.Contains(m.View(), glyphMeter) {
+		t.Fatal("bars dropped on a wide screen")
 	}
 }

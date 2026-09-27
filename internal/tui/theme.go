@@ -38,6 +38,7 @@ const (
 	glyphBoxOff    = "[ ]"
 	glyphActive    = "●"
 	glyphSeparator = " · "
+	glyphMeter     = "━"
 )
 
 // Theme is bound to one output stream, so a pipe or NO_COLOR gets plain text.
@@ -47,6 +48,7 @@ type Theme struct {
 	Title    lipgloss.Style
 	Text     lipgloss.Style
 	Muted    lipgloss.Style
+	Faint    lipgloss.Style
 	Accent   lipgloss.Style
 	OK       lipgloss.Style
 	Warn     lipgloss.Style
@@ -78,6 +80,7 @@ func NewTheme(w io.Writer) *Theme {
 		Title:    r.NewStyle().Bold(true),
 		Text:     r.NewStyle(),
 		Muted:    r.NewStyle().Foreground(muted),
+		Faint:    r.NewStyle().Foreground(faint),
 		Accent:   r.NewStyle().Foreground(accent),
 		OK:       r.NewStyle().Foreground(green),
 		Warn:     r.NewStyle().Foreground(yellow),
@@ -142,25 +145,34 @@ func indent(prefix string, lines []string) []string {
 }
 
 func (t *Theme) help(width int, pairs ...string) []string {
+	var hints []string
+	for i := 0; i+1 < len(pairs); i += 2 {
+		hints = append(hints, t.Key.Render(pairs[i])+" "+t.Muted.Render(pairs[i+1]))
+	}
+	return t.flow(width, hints)
+}
+
+// flow joins parts with separators, breaking lines between parts; a part
+// wider than the line is truncated.
+func (t *Theme) flow(width int, parts []string) []string {
 	separator := t.Muted.Render(glyphSeparator)
 	var lines []string
 	line, used := "", 0
-	for i := 0; i+1 < len(pairs); i += 2 {
-		hint := t.Key.Render(pairs[i]) + " " + t.Muted.Render(pairs[i+1])
-		w := lipgloss.Width(hint)
+	for _, part := range parts {
+		w := lipgloss.Width(part)
 		switch {
 		case line == "":
-			line, used = hint, w
+			line, used = part, w
 		case width > 0 && used+lipgloss.Width(glyphSeparator)+w > width:
-			lines = append(lines, line)
-			line, used = hint, w
+			lines = append(lines, fit(line, width))
+			line, used = part, w
 		default:
-			line += separator + hint
+			line += separator + part
 			used += lipgloss.Width(glyphSeparator) + w
 		}
 	}
 	if line != "" {
-		lines = append(lines, line)
+		lines = append(lines, fit(line, width))
 	}
 	return lines
 }

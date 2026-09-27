@@ -214,14 +214,21 @@ func relativeTime(stamp string) string {
 }
 
 func ago(d time.Duration) string {
+	if d < time.Minute {
+		return "just now"
+	}
+	return span(d) + " ago"
+}
+
+func span(d time.Duration) string {
 	switch {
 	case d < time.Minute:
-		return "just now"
+		return "under a minute"
 	case d < time.Hour:
-		return countNoun(int(d.Minutes()), "minute") + " ago"
+		return countNoun(int(d.Minutes()), "minute")
 	case d < 24*time.Hour:
-		return countNoun(int(d.Hours()), "hour") + " ago"
+		return countNoun(int(d.Hours()), "hour")
 	default:
-		return countNoun(int(d.Hours()/24), "day") + " ago"
+		return countNoun(int(d.Hours()/24), "day")
 	}
 }
